@@ -237,4 +237,3 @@ AI 에이전트는 검출·정렬·집계와 그 결과의 **초안 분석까지
 | 작업 규약 — 작업 방법론의 단일 정본 | `docs/manual/working_protocol.md` |
 | 거시 로드맵 — 마일스톤 목록의 정본 | `docs/manual/roadmap.md` |
 | 문서 위치 지도 — 문서가 어디 있는가 | `docs/document_map.md` |
-| 규칙 갱신 절차 — 템플릿과의 관계 | 규약 §6 |
