@@ -30,6 +30,7 @@
 | 문서 | 위치 | 상태 |
 |---|---|---|
 | 자발화 분석 도구 현황 조사 | `docs/domain/language_sample_analysis_tools.md` | 2026-08-23 조사. 이 분야 도구들의 작동 방식과 이 도구의 위치 |
+| 실전 실패 원인 진단 | `docs/tech/field_failure_diagnosis.md` | 2026-08-23 첫 실전 적용 실패의 수치 규명. `v0.1` 의 출발점 |
 
 ## 코드와 검증
 
