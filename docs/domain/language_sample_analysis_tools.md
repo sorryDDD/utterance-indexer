@@ -1,0 +1,223 @@
+# 자발화 분석 도구 현황 조사
+
+- **조사일**: 2026-08-23
+- **범위**: 언어치료 자발화 분석(LSA, Language Sample Analysis)에 쓰이는 도구 —
+  현장 표준 도구부터 진행 중인 연구까지, 각각의 작동 방식 포함
+- **목적**: 프로젝트 자체 도구(`scripts/speech_index.py`)의 위치와 개선 방향 판단 근거
+
+## 요약 — 이 분야의 병목은 전사다
+
+자발화 분석이 임상에서 널리 쓰이지 못하는 이유는 분석이 어려워서가 아니라 **전사가 감당이 안
+되기 때문**이다. Liu·MacWhinney 등(2023, JSLHR)은 녹음 시간 대비 전사 시간이 **평균 11:1**이며
+임상 표본은 그보다 나쁘다고 보고한다. 30분 회기면 전사에만 5시간이 넘는다.
+
+이 병목을 어디서 끊느냐에 따라 도구가 네 갈래로 나뉜다.
+
+| 세대 | 접근 | 대표 도구 |
+| --- | --- | --- |
+| 1세대 | 전사는 사람이, 계산만 자동 | SALT, CLAN/CHILDES |
+| 우회 | 표본 자체를 축소 | SUGAR |
+| 2세대 | 전사를 건너뛰고 발성만 검출·계수 | LENA, VTC, ALICE |
+| 3세대 | ASR을 붙여 전사까지 자동화 | Batchalign |
+
+## 1세대 — 전사는 사람이, 계산은 컴퓨터가
+
+### SALT (Systematic Analysis of Language Transcripts)
+
+1980년대 초 시작되어 지금까지 **임상 현장의 사실상 표준**이다.
+
+임상가가 전사 규약에 따라 발화를 입력하며 코드를 함께 단다(`|` 발화 구분, `*` 오류,
+`[코드]` 등). 소프트웨어는 이 규약을 파싱해 지표를 계산한다 — 총 낱말 수, 서로 다른 낱말
+수(NDW), TTR, MLU, Brown 단계, 화자별 발화 유형과 차례 길이.
+
+SALT의 핵심 가치는 계산이 아니라 **참조 데이터베이스**다. 같은 과제·연령대의 또래 표본과
+대조해 표준점수를 내주므로 진단적 판단의 근거가 된다.
+
+### CLAN / CHILDES / TalkBank
+
+학술 연구 쪽 표준이다. **CHAT** 전사 포맷에 발화를 적으면 CLAN이 형태통사 태거
+체인(MOR → POST → POSTMORTEM → MEGRASP)으로 형태소 분석과 의존구조를 붙이고,
+그 위에서 분석 명령을 실행한다.
+
+| 명령 | 계산 내용 |
+| --- | --- |
+| `KIDEVAL` | 아동 언어 종합 평가 |
+| `DSS` / `IPSyn` | 발달문장점수 / 생산적 구문 지수 |
+| `EVAL`, `C-NNLA`, `C-QPA` | 실어증 정량 분석 |
+| `EVAL-D` | 치매 언어 분석 |
+| `FluCalc` | 유창성 지표(반복·연장·쉼) |
+| `CoreLex` | 핵심 어휘 산출 여부 |
+
+강력하지만 **CHAT 주석을 손으로 다는 부담**이 커서, 이 점이 임상 확산을 막는 요인으로
+반복 지적된다.
+
+### 방법론적 우회 — SUGAR
+
+도구가 아니라 **프로토콜을 줄인** 접근이다. 50발화만 모으고 지표를 넷(MLU-낱말, 총낱말수,
+발화당 절 수, 발화당 낱말 수)으로 압축해 수집·전사·분석 전체를 **평균 20.9분**에 끝내도록
+설계했다. 다만 표본 축소가 타당도를 해친다는 반론이 있어 논쟁이 계속된다.
+
+### 주석 도구 — ELAN, Praat
+
+**ELAN**(막스플랑크 심리언어학연구소, GPLv3)은 영상·음성에 **티어(tier)** 단위로 시간 구간
+주석을 다는 도구다. 티어를 계층으로 엮을 수 있고 결과는 XML(EAF)로 저장된다. "영상 보며 구간
+표시" 워크플로라는 점에서 이 프로젝트의 리뷰어와 성격이 가장 가깝다 — 다만 구간을 **사람이
+찾아 긋는다**. **Praat**는 음향 분석(포먼트, 피치, 강도) 쪽 도구다.
+
+## 2세대 — 전사를 건너뛰고 소리만 센다
+
+이 프로젝트의 도구와 같은 범주다.
+
+### LENA
+
+하루 종일(약 16시간) 녹음한 오디오를 자동 처리한다.
+
+1. 짧은 창 단위로 음향 특징(진폭·강도 등)을 뽑아 **600ms 이상의 세그먼트**로 분할한다.
+2. 각 세그먼트를 화자 유형으로 분류한다 — 대상 아동, 성인 남성/여성, 다른 아동, 잡음, TV 등.
+3. 대상 아동 세그먼트를 다시 **생리적 소리 / 고정신호음 / 발성**으로 나누고, 길이·리듬·음도
+   조절을 기준으로 '발성'만 세어 **CVC**(아동 발성 수)를 산출한다.
+4. 성인 세그먼트는 인식기를 거쳐 **AWC**(성인 낱말 수)를 추정한다.
+5. 아동 발성이 성인 발화 **5초 이내**에 나오고 중간에 다른 아동이 끼어들지 않으면
+   **CTC**(대화 차례 수)로 계수한다.
+
+주목할 설계가 있다 — **겹쳐 말한 구간은 어느 쪽으로도 분류하지 않고 아예 제외한다.**
+오분류를 줄이려는 선택이다.
+
+### Voice Type Classifier (VTC) — LENA의 오픈소스 대안
+
+Lavechin 등(Interspeech 2020). **SincNet**(원시 파형에서 밴드패스 필터 자체를 학습하는 층) 위에
+순환층을 쌓아 프레임마다 `[SPEECH, KCHI, CHI, MAL, FEM]`을 **다중 레이블로** 분류한다.
+민난어·주호안시어·그리스어·일본어·영어·프랑스어·치마네어 등 **약 200시간**의 다국어 녹음으로
+학습했고, 모든 화자 범주에서 LENA를 큰 차이로 앞섰다.
+
+### ALICE
+
+VTC로 화자를 가른 뒤 **SylNet**으로 음절 수를 추정해 음소·음절·낱말 수를 낸다. LENA의 AWC에
+대응하는 오픈소스 대안이다.
+
+## 3세대 — ASR을 붙여 전사까지 자동화
+
+### Batchalign (TalkBank)
+
+현재 이 분야에서 가장 완성도 높은 파이프라인이다.
+
+1. **ASR** — Rev AI(클라우드) 또는 **로컬 Whisper**(`--whisper`)
+2. **발화 토큰화** — BERT 기반 발화 경계 분할
+3. **자동 교정** — 채우기음(um) 표준화, 반복 표기
+4. **화자 ID 할당** — 여기만 사람이 개입(약 2분)
+5. **강제정렬** — Montreal Forced Aligner로 낱말·발화 단위 시각 부여
+6. **사람 검수** — CLAN 편집기에서 재생하며 수정(30분 녹음당 60~90분)
+7. **형태통사 분석·프로파일링** — Stanza 및 CLAN 명령 체인
+
+보고된 성능은 다음과 같다.
+
+| 항목 | 수치 |
+| --- | --- |
+| 낱말 오류율(WER) | 정상 2.4% / 환자군 3.4% |
+| 발화 분할 F₁ | 정상 85.1% / MCI 86.9% |
+| 낱말 단위 화자 할당 | 정상 93.7% / 인지장애 85.2% |
+| CHAT 형식 준수 | 100% |
+| **전사 시간 절감** | **최대 75%** |
+
+30분 녹음 기준 자동 처리 7분 + 사람 검수 60~90분으로, 기존 10시간이 2시간 미만이 된다.
+최신판은 **Batchalign3**로 로컬 Whisper·강제정렬·신경망 형태소 태깅·번역을 포함한다.
+
+논문이 밝힌 한계가 중요하다 — 잡음에 취약하고, **겹친 발화를 다루지 못하며**, 어린 아동과
+**명확한 음운 문제가 있는 화자에게는 부적합**하고, 영어만 검증되었으며, 클라우드 ASR을 쓸 경우
+**HIPAA 대상 데이터에는 쓸 수 없다.**
+
+## 진행 중인 연구
+
+### 장애 음성 ASR — Speech Accessibility Project (UIUC)
+
+미국·캐나다·푸에르토리코의 말장애 화자 음성을 체계적으로 수집·전사·배포하는 사업이다.
+파킨슨병 관련 마비말장애 화자 211명 데이터의 기준 성능은 다음과 같다.
+
+| 화자 | WER |
+| --- | --- |
+| 일반 화자 | 3.4% |
+| 마비말장애 화자 | **36.3%** |
+| 위를 파인튜닝한 경우 | 23.7% |
+
+2008~2023년 사이 마비말장애 ASR 오류율은 **3배** 줄었지만 일반 화자는 **5배** 줄어
+**격차가 오히려 벌어졌다.** Interspeech 2025에서 전용 챌린지가 열렸고, ICASSP 2026에는
+LLM 기반 ASR 후처리 교정, 신뢰도 기반 오류 교정 연구가 올라와 있다.
+
+### 비언어 발성 모델링
+
+낱말이 아닌 소리(웃음·울음·숨·기침·웅얼거림)를 ASR이 다루게 하려는 연구다. NonverbalTTS,
+NonVerbalSpeech-38K 같은 데이터셋이 나왔고, 핵심 난점은 **주석이 희소하고 분포가 극단적으로
+치우쳐 있다**는 점이다(숨·웃음은 흔하고 울음·기침은 드묾).
+
+아동 쪽에서는 자기지도학습으로 **발성 성숙도를 언어 간 공통으로 분류**하려는 연구, 웨어러블
+녹음의 화자 분류 한계를 짚는 연구가 2025~2026년에 이어지고 있다.
+
+### LLM을 이용한 담화 분석
+
+CLAN이 요구하는 수작업 주석을 LLM으로 대체하려는 흐름이다. 실어증 담화 분석에서 사전학습
+LLM의 임상적 유효성을 검증한 연구가 있으나, **결과물은 여전히 임상가 검증을 거쳐야 한다**는
+것이 공통된 결론이다.
+
+## 한국어권 상황
+
+**SALT·CLAN에 상응하는 표준 도구가 없다.** 이번 조사 범위에서 상용 한국어 LSA 프로그램은
+확인되지 않았고, 실제로는 수기 전사 후 지표를 손으로 세는 방식이 일반적이다.
+
+최근 연구로 강민국 등(2025, 『언어치료연구』 34권 3호)이 장노년층 60명의 그림 설명 발화를
+대상으로 **클로바노트**(한국어 특화 STT) 자동 전사와 **ChatGPT-4o** 자동 분석을 검증했다.
+
+- 클로바노트 전사 일치율: 장년층 **80.60%**, 노년층 **78.92%**
+- GPT-4o의 유창성 지표는 사람과 통계적으로 유사했으나, CIU 분석은 프롬프트 수정 후
+  장년층에서만 개선
+- 결론: **"정확한 전사를 위해서는 사람의 추가 검토가 필수적"**
+
+이것이 **말장애가 없는** 장노년층 대상 수치라는 점을 유념할 필요가 있다.
+
+## 이 프로젝트 도구의 위치
+
+### 전사를 부차적으로 둔 판단은 문헌과 맞는다
+
+대상자는 뇌병변으로 인한 언어장애가 있고 조음이 불명료하다. 마비말장애 화자의 WER이 36.3%,
+파인튜닝해도 23.7%인데 이는 **읽기 과제 중심의 성인 데이터** 기준이다. 지적장애가 동반된
+극소 발화에는 더 나쁠 것으로 보아야 한다. Batchalign 논문도 "명확한 음운 문제가 있는
+참가자에게는 부적합"하다고 명시한다. 전사 품질을 올리는 방향으로는 이 문제가 풀리지 않는다.
+
+### 도구는 2세대(LENA·VTC) 계열이다
+
+전사 없이 발성을 검출하고 화자를 분류해 계수·인덱싱한다는 점에서 같은 범주다. 다만 그 계열은
+전부 **영유아 중심**이며, 성인 임상 회기용으로 만들어진 것은 이번 조사 범위에서 확인되지 않았다.
+
+### 로컬 처리는 실질적 강점이다
+
+Batchalign 논문이 클라우드 ASR 때문에 HIPAA 대상 데이터에 쓸 수 없다고 명시한 바로 그 제약을,
+이 도구는 처음부터 피해 간다.
+
+### 개선 여지
+
+- 현재 화자 판별은 k-means 기반으로, 이 분야 표준(SincNet+RNN 기반 VTC, pyannote 계열
+  화자분리)에 비하면 소박하다.
+- LENA·Batchalign이 공통으로 지적하는 **겹친 발화 문제**를 이 도구도 똑같이 안고 있다.
+  촉진과 반응이 겹치는 임상 회기에서 실제로 부딪힐 대목이다.
+- 구간 정보를 **ELAN의 EAF** 또는 **CHAT 포맷**으로 내보내면 기존 연구 도구와 연결할 수 있다.
+
+## 출처
+
+- [Salt Software](https://www.saltsoftware.com/)
+- [Systematic Analysis of Language Transcripts Solutions: A Tutorial (ASHA Perspectives, 2023)](https://pubs.asha.org/doi/10.1044/2022_PERSP-22-00148)
+- [Automation of Language Sample Analysis (Liu, MacWhinney, Fromm, Lanzi, JSLHR 2023)](https://pmc.ncbi.nlm.nih.gov/articles/PMC10555460/)
+- [TalkBank Batchalign2 (GitHub)](https://github.com/TalkBank/batchalign2)
+- [TalkBank talkbank-tools / Batchalign3 (GitHub)](https://github.com/TalkBank/talkbank-tools)
+- [The LENA Language Environment Analysis System: ITS File (기술보고서)](https://www.lena.org/wp-content/uploads/2016/07/LTR-04-2_ITS_File.pdf)
+- [A thorough evaluation of the LENA system (Behavior Research Methods)](https://pmc.ncbi.nlm.nih.gov/articles/PMC7855224/)
+- [An Open-Source Voice Type Classifier for Child-Centered Daylong Recordings (Lavechin et al., Interspeech 2020)](https://www.isca-archive.org/interspeech_2020/lavechin20_interspeech.pdf)
+- [voice-type-classifier (GitHub)](https://github.com/MarvinLvn/voice-type-classifier)
+- [ALICE: Automatic LInguistic Unit Count Estimator](https://pmc.ncbi.nlm.nih.gov/articles/PMC8062390)
+- [Community-Supported Shared Infrastructure in Support of Speech Accessibility (JSLHR 2024)](https://pmc.ncbi.nlm.nih.gov/articles/PMC12379581/)
+- [The Interspeech 2025 Speech Accessibility Project Challenge](https://arxiv.org/pdf/2507.22047)
+- [Beyond Words: Towards Effective Modeling of Non-Verbal Vocalizations in ASR](https://arxiv.org/abs/2607.01563)
+- [Automated Analysis of Naturalistic Recordings in Early Childhood (arXiv 2509.18235)](https://arxiv.org/pdf/2509.18235)
+- [SUGAR: Breaking Tradition (LSHSS)](https://pubs.asha.org/doi/10.1044/2018_LSHSS-18-0130)
+- [Is Putting SUGAR into Language Sample Analysis a Good Thing?](https://pmc.ncbi.nlm.nih.gov/articles/PMC6105128/)
+- [ELAN Multimedia Annotation Tool (Max Planck Institute)](https://www.mpi.nl/corpus/html/elan_ug/pr01.html)
+- [음성인식 및 생성형 AI의 발화 전사 및 분석 능력 탐색 (강민국 외, 언어치료연구 2025, 34권 3호)](https://jslhd.org/_common/do.php?a=full&b=12&bidx=4163&aidx=45947)
+- [Clinical efficacy of pre-trained large language models through the lens of aphasia (Scientific Reports)](https://www.nature.com/articles/s41598-024-66576-y)

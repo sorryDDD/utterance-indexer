@@ -1,0 +1,263 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>발화 리뷰어</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2c313b; --fg: #e6e9ef;
+    --dim: #8b93a3; --accent: #6ea8fe; --target: #ffb454; --other: #566179;
+    --noise: #3a4050; --ok: #6bcB77; --no: #e06c75;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); height: 100vh;
+         display: grid; grid-template-columns: 1fr 380px; overflow: hidden;
+         font: 14px/1.5 -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  main { display: flex; flex-direction: column; min-width: 0; padding: 12px; gap: 10px; }
+  video { width: 100%; background: #000; border-radius: 8px; flex: 1; min-height: 0; object-fit: contain; }
+
+  #timeline { position: relative; height: 46px; background: var(--panel);
+              border: 1px solid var(--line); border-radius: 6px; cursor: pointer; flex: none; }
+  #timeline .seg { position: absolute; top: 6px; height: 22px; min-width: 2px; border-radius: 2px; }
+  #timeline .seg.target { background: var(--target); top: 2px; height: 30px; }
+  #timeline .seg.other  { background: var(--other); }
+  #timeline .seg.noise  { background: var(--noise); height: 10px; top: 12px; }
+  #playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; pointer-events: none; }
+  #ticks { position: absolute; bottom: 1px; left: 0; right: 0; height: 12px;
+           font-size: 9px; color: var(--dim); pointer-events: none; }
+  #ticks span { position: absolute; transform: translateX(-50%); }
+
+  #now { flex: none; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+         background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+  #now b { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .tag { font-size: 11px; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); }
+  .tag.target { background: var(--target); color: #201400; border-color: transparent; font-weight: 600; }
+  .tag.ok { background: var(--ok); color: #04220c; border-color: transparent; }
+  .tag.no { background: var(--no); color: #2a0505; border-color: transparent; }
+  #nowtext { color: var(--dim); font-size: 13px; }
+
+  aside { border-left: 1px solid var(--line); display: flex; flex-direction: column;
+          background: var(--panel); min-height: 0; }
+  header { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 0 4px; font-size: 14px; }
+  header .meta { color: var(--dim); font-size: 12px; }
+  #controls { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 6px; flex-wrap: wrap; }
+  button { background: #262b35; color: var(--fg); border: 1px solid var(--line);
+           border-radius: 5px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); color: #06183b; border-color: transparent; font-weight: 600; }
+
+  #list { overflow-y: auto; flex: 1; }
+  .row { display: grid; grid-template-columns: 62px 44px 1fr; gap: 8px; align-items: baseline;
+         padding: 7px 12px; border-bottom: 1px solid #232833; cursor: pointer; }
+  .row:hover { background: #232833; }
+  .row.cur { background: #2d3547; box-shadow: inset 3px 0 0 var(--accent); }
+  .row.hidden { display: none; }
+  .row .t { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 13px; }
+  .row .d { color: var(--dim); font-size: 11px; text-align: right; }
+  .row .x { min-width: 0; }
+  .row .x .txt { color: var(--dim); font-size: 12px; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
+  .row.is-target .t { color: var(--target); font-weight: 600; }
+  .row .mark { font-size: 11px; margin-left: 5px; }
+  kbd { background: #2b3140; border: 1px solid var(--line); border-bottom-width: 2px;
+        border-radius: 4px; padding: 0 4px; font-size: 11px; }
+  #help { padding: 9px 12px; border-top: 1px solid var(--line); color: var(--dim);
+          font-size: 11.5px; line-height: 1.9; }
+  #err { display: none; background: #4a1f1f; color: #ffd7d7; padding: 8px 12px;
+         font-size: 12px; border-radius: 6px; }
+</style>
+
+<main>
+  <div id="err"></div>
+  <video id="v" controls preload="metadata"></video>
+  <div id="timeline"><div id="playhead"></div><div id="ticks"></div></div>
+  <div id="now">
+    <b id="nowtime">--:--</b>
+    <span class="tag" id="nowspk">—</span>
+    <span class="tag" id="nowlab" hidden></span>
+    <span id="nowtext"></span>
+  </div>
+</main>
+
+<aside>
+  <header>
+    <h1 id="title">발화 리뷰어</h1>
+    <div class="meta" id="stats"></div>
+  </header>
+  <div id="controls">
+    <button id="fBtn" class="on">대상자 후보만</button>
+    <button id="loopBtn">구간 반복</button>
+    <button id="autoBtn" class="on">구간 끝 정지</button>
+    <button id="expBtn">라벨 내보내기</button>
+  </div>
+  <div id="list"></div>
+  <div id="help">
+    <kbd>J</kbd>/<kbd>K</kbd> 이전·다음 구간 &nbsp; <kbd>Space</kbd> 재생/정지 &nbsp; <kbd>R</kbd> 반복<br>
+    <kbd>1</kbd> 대상자 &nbsp; <kbd>2</kbd> 임상가 &nbsp; <kbd>3</kbd> 잡음 &nbsp; <kbd>0</kbd> 라벨 해제<br>
+    <kbd>F</kbd> 필터 &nbsp; <kbd>,</kbd>/<kbd>.</kbd> 0.5초 &nbsp; <kbd>-</kbd>/<kbd>=</kbd> 속도
+  </div>
+</aside>
+
+<script>
+const DATA = /*__DATA__*/;
+const v = document.getElementById('v');
+const listEl = document.getElementById('list');
+const KEY = 'speechIndexLabels:' + DATA.key;
+let labels = JSON.parse(localStorage.getItem(KEY) || '{}');
+let cur = 0, filterOn = true, loopOn = false, autoStop = true;
+
+v.src = DATA.video;
+v.addEventListener('error', () => {
+  const e = document.getElementById('err');
+  e.style.display = 'block';
+  e.textContent = '영상을 재생할 수 없습니다. 코덱이 브라우저와 맞지 않을 수 있습니다 — '
+                + 'speech_index.py 를 --proxy 옵션으로 다시 실행하십시오.';
+});
+
+const fmt = t => {
+  const h = Math.floor(t/3600), m = Math.floor(t%3600/60), s = Math.floor(t%60);
+  return (h ? String(h).padStart(2,'0')+':' : '') + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+};
+const isTarget = s => labels[s.idx] ? labels[s.idx] === 'target' : s.is_target;
+const visible  = s => !filterOn || isTarget(s);
+
+/* ---------- 목록 ---------- */
+DATA.segments.forEach((s, i) => {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.dataset.i = i;
+  row.innerHTML = `<div class="t">${fmt(s.start)}</div><div class="d">${s.dur.toFixed(1)}s</div>
+    <div class="x"><span class="spk"></span><span class="mark"></span>
+    <div class="txt">${(s.text || '').replace(/</g,'&lt;') || '&nbsp;'}</div></div>`;
+  row.onclick = () => go(i);
+  listEl.appendChild(row);
+});
+const rows = [...listEl.children];
+
+function paintRows() {
+  DATA.segments.forEach((s, i) => {
+    const r = rows[i], lab = labels[s.idx];
+    r.classList.toggle('is-target', isTarget(s));
+    r.classList.toggle('hidden', !visible(s));
+    r.querySelector('.spk').textContent = isTarget(s) ? '대상자' : '임상가';
+    r.querySelector('.mark').textContent =
+      lab === 'target' ? ' ✓' : lab === 'other' ? ' ✗' : lab === 'noise' ? ' ·' : '';
+  });
+  const n = DATA.segments.filter(isTarget);
+  document.getElementById('stats').textContent =
+    `${DATA.name} · 전체 ${fmt(DATA.duration)} · 구간 ${DATA.segments.length}개 · ` +
+    `대상자 ${n.length}개 (${n.reduce((a,s)=>a+s.dur,0).toFixed(0)}초)`;
+}
+
+/* ---------- 타임라인 ---------- */
+const tl = document.getElementById('timeline');
+function paintTimeline() {
+  tl.querySelectorAll('.seg').forEach(e => e.remove());
+  DATA.segments.forEach((s, i) => {
+    const d = document.createElement('div');
+    d.className = 'seg ' + (labels[s.idx] === 'noise' ? 'noise' : isTarget(s) ? 'target' : 'other');
+    d.style.left  = (s.start / DATA.duration * 100) + '%';
+    d.style.width = Math.max(0.08, s.dur / DATA.duration * 100) + '%';
+    d.title = fmt(s.start) + ' · ' + s.dur.toFixed(1) + 's';
+    d.onclick = ev => { ev.stopPropagation(); go(i); };
+    tl.insertBefore(d, tl.firstChild);
+  });
+  const ticks = document.getElementById('ticks');
+  ticks.innerHTML = '';
+  const step = DATA.duration > 3600 ? 600 : DATA.duration > 900 ? 300 : 60;
+  for (let t = 0; t < DATA.duration; t += step) {
+    const sp = document.createElement('span');
+    sp.style.left = (t / DATA.duration * 100) + '%';
+    sp.textContent = fmt(t);
+    ticks.appendChild(sp);
+  }
+}
+tl.onclick = e => {
+  const r = tl.getBoundingClientRect();
+  v.currentTime = (e.clientX - r.left) / r.width * DATA.duration;
+  v.play();
+};
+
+/* ---------- 이동 ---------- */
+function go(i, play = true) {
+  if (i < 0 || i >= DATA.segments.length) return;
+  cur = i;
+  const s = DATA.segments[i];
+  v.currentTime = Math.max(0, s.start - DATA.pad);
+  rows.forEach(r => r.classList.remove('cur'));
+  rows[i].classList.add('cur');
+  rows[i].scrollIntoView({ block: 'nearest' });
+  document.getElementById('nowtime').textContent = fmt(s.start);
+  document.getElementById('nowspk').textContent = isTarget(s) ? '대상자 후보' : '임상가';
+  document.getElementById('nowspk').className = 'tag' + (isTarget(s) ? ' target' : '');
+  document.getElementById('nowtext').textContent = s.text || '';
+  showLabel();
+  if (play) v.play();
+}
+function step(dir) {
+  for (let i = cur + dir; i >= 0 && i < DATA.segments.length; i += dir)
+    if (visible(DATA.segments[i])) return go(i);
+}
+function showLabel() {
+  const lab = labels[DATA.segments[cur].idx];
+  const el = document.getElementById('nowlab');
+  el.hidden = !lab;
+  if (lab) {
+    el.textContent = lab === 'target' ? '대상자로 표시' : lab === 'other' ? '임상가로 표시' : '잡음';
+    el.className = 'tag ' + (lab === 'target' ? 'ok' : lab === 'noise' ? '' : 'no');
+  }
+}
+
+v.addEventListener('timeupdate', () => {
+  document.getElementById('playhead').style.left = (v.currentTime / DATA.duration * 100) + '%';
+  const s = DATA.segments[cur];
+  if (!s) return;
+  if (v.currentTime > s.end + DATA.pad) {
+    if (loopOn) v.currentTime = Math.max(0, s.start - DATA.pad);
+    else if (autoStop) v.pause();
+  }
+});
+
+/* ---------- 라벨 ---------- */
+function setLabel(kind) {
+  const s = DATA.segments[cur];
+  if (kind) labels[s.idx] = kind; else delete labels[s.idx];
+  localStorage.setItem(KEY, JSON.stringify(labels));
+  paintRows(); paintTimeline(); showLabel();
+}
+document.getElementById('expBtn').onclick = () => {
+  const out = { video: DATA.name, labels,
+    targets: DATA.segments.filter(s => labels[s.idx] === 'target')
+                          .map(s => ({ idx: s.idx, start: s.start, end: s.end })) };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'labels.json';
+  a.click();
+};
+
+/* ---------- 버튼·키보드 ---------- */
+const toggle = (btn, get, set) => btn.onclick = () => { set(!get()); btn.classList.toggle('on', get()); };
+toggle(document.getElementById('fBtn'),    () => filterOn, x => { filterOn = x; paintRows(); });
+toggle(document.getElementById('loopBtn'), () => loopOn,   x => loopOn = x);
+toggle(document.getElementById('autoBtn'), () => autoStop, x => autoStop = x);
+
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const k = e.key.toLowerCase();
+  const map = {
+    'j': () => step(-1), 'arrowup': () => step(-1),
+    'k': () => step(1),  'arrowdown': () => step(1),
+    ' ': () => v.paused ? v.play() : v.pause(),
+    'r': () => go(cur),
+    'f': () => document.getElementById('fBtn').click(),
+    ',': () => v.currentTime -= 0.5, '.': () => v.currentTime += 0.5,
+    '-': () => v.playbackRate = Math.max(0.25, v.playbackRate - 0.25),
+    '=': () => v.playbackRate = Math.min(3, v.playbackRate + 0.25),
+    '1': () => setLabel('target'), '2': () => setLabel('other'),
+    '3': () => setLabel('noise'),  '0': () => setLabel(null),
+  };
+  if (map[k]) { e.preventDefault(); map[k](); }
+});
+
+paintRows(); paintTimeline(); go(0, false);
+</script>

@@ -3,5 +3,24 @@
 # `.markdownlint.jsonc`는 추적 대상이다 — 문서 형식 규칙을 강제하는 유일한 장치이므로
 # 저장소에 함께 남긴다(작업 규약 §4 「문서 형식」).
 
-# 〔기입〕 스택이 정해지면 해당 생태계의 무시 규칙을 여기 더한다.
-# 예) node_modules/ · dist/ · .env · __pycache__/ · .venv/
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# ── 금지선(AGENTS.md §2) ──────────────────────────────────────────
+# 임상 음성·영상과 그 산출물은 어떤 경우에도 추적하지 않는다.
+speech-index-*/
+*.mp4
+*.mov
+*.m4v
+*.mkv
+*.avi
+*.MTS
+*.wav
+*.mp3
+*.m4a
+asr.json
+segments.json
+subtitles.vtt
+reviewer.html
