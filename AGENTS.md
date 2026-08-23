@@ -80,11 +80,11 @@ curl -LO https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5
 
 ### 원격 저장소와 공개 범위
 
-- **원격 저장소**: 없음 — 로컬 전용. 원격 생성은 작업지시자 승인 사항이다.
-- **공개 범위**: private 외에는 검토하지 않는다. 임상 음성을 다루는 도구이므로 public 전환은 고려 대상이 아니다.
-- 브랜치는 규약대로 `main` / `devel` 을 쓴다.
+- **원격 저장소**: [sorryDDD/utterance-indexer](https://github.com/sorryDDD/utterance-indexer) (`origin`).
+- **공개 범위**: `private`. 저장소 소유자와 직접 초대된 collaborator만 접근한다.
+- 기본 브랜치는 `main`, 통합 브랜치는 `devel`이다.
 - 커밋 메시지는 한국어로 쓴다.
-- **추적 예외**: 산출물 폴더(`speech-index-*`), 모든 미디어 파일, `.venv/`. `.gitignore` 참조.
+- **추적 예외**: 산출물 폴더(`speech-index-*`), 산출물 파일, 모든 미디어 파일, `.venv/`. `.gitignore` 참조.
 
 ## 2. 승인 없이 진행하지 않는 작업
 
