@@ -35,6 +35,11 @@ SR = 16000
 FRAME = 400          # 25 ms
 HOP = 160            # 10 ms
 N_BANDS = 32
+F0_FLOOR = 60.0
+F0_CEILING = 600.0
+F0_LEGACY_CEILING = 400.0
+F0_PERIODICITY_THRESHOLD = 0.3
+F0_OCTAVE_COST = 0.01
 TEMPLATE = Path(__file__).with_name("reviewer_template.html")
 
 
@@ -123,6 +128,8 @@ class Segment:
     src: str                     # E=에너지, S=Silero, ES=둘 다
     rms_db: float = 0.0
     f0: float = 0.0
+    f0_status: str = "unvoiced"
+    f0_corrected_fraction: float = 0.0
     embedding: list[float] = field(default_factory=list, repr=False)
     speaker: int | None = None
     score: float = 0.0
@@ -220,8 +227,35 @@ def _band_edges() -> np.ndarray:
 BAND_EDGES = _band_edges()
 
 
-def estimate_f0(seg: np.ndarray) -> float:
-    f0s, win = [], 1024
+def _parabolic_peak(ac: np.ndarray, peak: int) -> float:
+    """자기상관 국소 최댓값의 지연을 포물선 보간한다."""
+    left, center, right = float(ac[peak - 1]), float(ac[peak]), float(ac[peak + 1])
+    denominator = left - 2.0 * center + right
+    if abs(denominator) < 1e-12:
+        return float(peak)
+    return float(peak) + 0.5 * (left - right) / denominator
+
+
+def _pitch_candidates(ac: np.ndarray) -> list[tuple[float, float, int]]:
+    """60–600 Hz 국소 최댓값을 고주파 선호 옥타브 비용으로 순위화한다."""
+    lo = max(1, math.ceil(SR / F0_CEILING))
+    hi = min(len(ac) - 2, math.floor(SR / F0_FLOOR))
+    candidates = []
+    for peak in range(lo, hi + 1):
+        strength = float(ac[peak])
+        if (strength <= F0_PERIODICITY_THRESHOLD or strength < ac[peak - 1]
+                or strength <= ac[peak + 1]):
+            continue
+        lag = _parabolic_peak(ac, peak)
+        f0 = SR / lag
+        if F0_FLOOR <= f0 <= F0_CEILING:
+            octave_penalty = F0_OCTAVE_COST * math.log2(F0_CEILING / f0)
+            candidates.append((strength - octave_penalty, f0, peak))
+    return candidates
+
+
+def estimate_f0(seg: np.ndarray) -> tuple[float, str, float]:
+    f0s, corrected, win = [], 0, 1024
     for i in range(0, max(1, len(seg) - win), win // 2):
         chunk = seg[i:i + win]
         if len(chunk) < win or float(np.sqrt((chunk ** 2).mean())) < 1e-3:
@@ -231,29 +265,40 @@ def estimate_f0(seg: np.ndarray) -> float:
         if ac[0] <= 0:
             continue
         ac /= ac[0]
-        lo, hi = SR // 400, SR // 60          # 60–400 Hz
-        if hi >= len(ac):
+        candidates = _pitch_candidates(ac)
+        if not candidates:
             continue
-        peak = int(np.argmax(ac[lo:hi])) + lo
-        if ac[peak] > 0.3:
-            f0s.append(SR / peak)
-    return float(np.median(f0s)) if f0s else 0.0
+        _, f0, peak = max(candidates, key=lambda item: (item[0], item[1]))
+        f0s.append(f0)
+
+        legacy_lo = SR // int(F0_LEGACY_CEILING)
+        legacy_hi = min(len(ac), SR // int(F0_FLOOR))
+        legacy_peak = int(np.argmax(ac[legacy_lo:legacy_hi])) + legacy_lo
+        if (f0 > F0_LEGACY_CEILING
+                and ac[legacy_peak] > F0_PERIODICITY_THRESHOLD
+                and abs(legacy_peak - 2 * peak) <= 2):
+            corrected += 1
+
+    if not f0s:
+        return 0.0, "unvoiced", 0.0
+    fraction = corrected / len(f0s)
+    return float(np.median(f0s)), ("octave_corrected" if corrected else "ok"), fraction
 
 
-def embed(seg_audio: np.ndarray) -> tuple[np.ndarray, float, float]:
+def embed(seg_audio: np.ndarray) -> tuple[np.ndarray, float, float, str, float]:
     frames = frame_signal(seg_audio)
     if len(frames) == 0:
-        return np.zeros(N_BANDS * 2 + 1), -99.0, 0.0
+        return np.zeros(N_BANDS * 2 + 1), -99.0, 0.0, "unvoiced", 0.0
     spec = np.abs(np.fft.rfft(frames, axis=1)) ** 2
     bands = np.stack([
         spec[:, BAND_EDGES[i]:max(BAND_EDGES[i] + 1, BAND_EDGES[i + 1])].mean(axis=1)
         for i in range(N_BANDS)], axis=1)
     log_bands = np.log(bands + 1e-10)
     log_bands -= log_bands.mean(axis=1, keepdims=True)      # 볼륨·채널 정규화
-    f0 = estimate_f0(seg_audio)
+    f0, f0_status, f0_corrected_fraction = estimate_f0(seg_audio)
     vec = np.concatenate([log_bands.mean(axis=0), log_bands.std(axis=0), [f0 / 200.0]])
     rms_db = float(10 * np.log10(max((seg_audio ** 2).mean(), 1e-12)))
-    return vec, rms_db, f0
+    return vec, rms_db, f0, f0_status, f0_corrected_fraction
 
 
 def normalize(v: np.ndarray) -> np.ndarray:
@@ -277,6 +322,15 @@ def kmeans(X: np.ndarray, k: int = 2, iters: int = 60, seed: int = 0) -> np.ndar
             if (labels == j).any():
                 c[j] = X[labels == j].mean(axis=0)
     return labels
+
+
+def pick_cluster_by_duration(labels: np.ndarray, durations: np.ndarray,
+                             k: int) -> tuple[int, np.ndarray]:
+    """비어 있지 않은 무리 중 검출 구간의 총 발화 시간이 가장 짧은 무리를 고른다."""
+    counts = np.bincount(labels, minlength=k)
+    totals = np.bincount(labels, weights=durations, minlength=k)
+    comparable = np.where(counts > 0, totals, math.inf)
+    return int(np.argmin(comparable)), totals
 
 
 def split_by_similarity(scores: np.ndarray) -> float:
@@ -454,8 +508,11 @@ def main() -> int:
     print("[3/6] 음향 임베딩", flush=True)
     segments = []
     for i, (a, b, src) in enumerate(spans, start=1):
-        vec, rms_db, f0 = embed(x[int(a * SR):int(b * SR)])
+        vec, rms_db, f0, f0_status, f0_corrected_fraction = embed(
+            x[int(a * SR):int(b * SR)])
         segments.append(Segment(idx=i, start=a, end=b, src=src, rms_db=rms_db, f0=f0,
+                                f0_status=f0_status,
+                                f0_corrected_fraction=f0_corrected_fraction,
                                 embedding=normalize(vec).tolist()))
     E = np.array([s.embedding for s in segments])
 
@@ -488,12 +545,14 @@ def main() -> int:
             print(f"      ⚠ 화자 무리 간 음색 차이가 작습니다(유사도 차 {gap:.3f}). "
                   "참조 발화를 더 지정하거나 --speakers 를 조정하십시오.", flush=True)
     else:
-        pick = int(np.argmin([c if c else 10**9 for c in counts]))
+        pick, total_durations = pick_cluster_by_duration(
+            labels, np.array([s.dur for s in segments]), args.speakers)
         for s, lab in zip(segments, labels):
             s.speaker, s.is_target = int(lab), bool(lab == pick)
             s.score = (1.0 if lab == pick else 0.0) + 0.5 * max(0.0, 1.0 - s.dur / 4.0)
-        mode = (f"{args.speakers}화자 무리로 분리 — 가장 적게 말한 "
-                f"{pick}번 무리({counts[pick]}/{len(segments)}구간)를 대상자로 추정")
+        mode = (f"{args.speakers}화자 무리로 분리 — 총 발화 시간이 가장 짧은 "
+                f"{pick}번 무리({hhmmss(total_durations[pick])}, "
+                f"{counts[pick]}/{len(segments)}구간)를 대상자로 추정")
 
     n_target = sum(s.is_target for s in segments)
     print(f"      대상자 후보 {n_target}개 / 전체 {len(segments)}개", flush=True)

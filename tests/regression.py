@@ -24,6 +24,10 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from src.speech_index import estimate_f0, pick_cluster_by_duration
+
 SR = 16000
 JFK = Path("/opt/homebrew/share/whisper-cpp/jfk.wav")
 
@@ -31,6 +35,31 @@ JFK = Path("/opt/homebrew/share/whisper-cpp/jfk.wav")
 MIN_DETECTION = 1.00
 MIN_CLASSIFICATION = 0.90
 MAX_FALSE_POSITIVE_RATIO = 0.30
+
+
+def verify_principle_fixes() -> None:
+    """F0 옥타브와 구간 수 대 발화 시간 오류를 외부 음원 없이 재현한다."""
+    t = np.arange(int(SR * 0.12)) / SR
+    tone_250 = 0.5 * np.sin(2 * np.pi * 250 * t)
+    tone_500 = 0.5 * np.sin(2 * np.pi * 500 * t)
+
+    f0_250, status_250, _ = estimate_f0(tone_250.astype(np.float32))
+    f0_500, status_500, corrected_500 = estimate_f0(tone_500.astype(np.float32))
+    f0_silence, status_silence, _ = estimate_f0(np.zeros_like(tone_250, dtype=np.float32))
+    if not (abs(f0_250 - 250) < 5 and status_250 == "ok"):
+        raise AssertionError(f"250 Hz 추정 실패: {f0_250:.1f} Hz, {status_250}")
+    if not (abs(f0_500 - 500) < 10 and status_500 == "octave_corrected"
+            and corrected_500 > 0):
+        raise AssertionError(
+            f"500 Hz 옥타브 교정 실패: {f0_500:.1f} Hz, {status_500}, {corrected_500:.2f}")
+    if not (f0_silence == 0 and status_silence == "unvoiced"):
+        raise AssertionError(f"무음 판정 실패: {f0_silence:.1f} Hz, {status_silence}")
+
+    labels = np.array([0, 0, 0, 1])
+    durations = np.array([0.2, 0.2, 0.2, 2.0])
+    pick, totals = pick_cluster_by_duration(labels, durations, 2)
+    if pick != 0 or not np.allclose(totals, [0.6, 2.0]):
+        raise AssertionError(f"발화 시간 기준 무리 선택 실패: {pick}, {totals.tolist()}")
 
 
 def resample(a: np.ndarray, ratio: float) -> np.ndarray:
@@ -132,6 +161,9 @@ def main() -> int:
     if not JFK.exists():
         print(f"검증용 음원이 없습니다: {JFK}", file=sys.stderr)
         return 1
+
+    verify_principle_fixes()
+    print("원리적 버그 합성 검증 통과 — 250 Hz, 500 Hz, 무음, 무리 선택\n", flush=True)
 
     work = Path(tempfile.mkdtemp(prefix="utterance-indexer-test-"))
     try:
