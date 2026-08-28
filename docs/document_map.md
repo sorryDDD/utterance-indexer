@@ -52,7 +52,9 @@ grep -H '^- \*\*상태\*\*' docs/topics/*/000_색인.md
 |---|---|---|
 | 본체 | `src/speech_index.py` | 오디오 추출 → 발성 검출 → 화자 판별 → 전사 → 산출물 생성 |
 | 리뷰어 화면 | `src/reviewer_template.html` | 데이터를 주입해 `reviewer.html` 로 산출되는 단일 HTML |
+| 라벨링 도구 | `src/labeler.html` | 정답 라벨을 사람이 직접 다는 단일 HTML. 검출 파이프라인과 무관하다 |
 | 사용법 | `docs/manual/usage.md` | 옵션·운용 절차의 정본 |
+| 라벨링 절차 | `docs/manual/labeling_procedure.md` | 정답 라벨을 만드는 절차의 정본 |
 | 회귀 검증 | `tests/regression.py` | 합성 음원으로 검출률·분류율·오탐비 측정 |
 
 ## 여기 없는 것
