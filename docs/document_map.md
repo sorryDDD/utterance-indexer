@@ -56,6 +56,7 @@ grep -H '^- \*\*상태\*\*' docs/topics/*/000_색인.md
 | 라벨링 도구 | `src/labeler.html` | 정답 라벨을 사람이 직접 다는 단일 HTML. 검출 파이프라인과 무관하다 |
 | 사용법 | `docs/manual/usage.md` | 옵션·운용 절차의 정본 |
 | 라벨링 절차 | `docs/manual/labeling_procedure.md` | 정답 라벨을 만드는 절차의 정본 |
+| 실전 채점 하니스 | `tests/evaluate_session.py` | 저장소 밖의 정답 라벨과 파이프라인 산출물을 로컬에서 집계. `--self-test`는 합성 JSON만 쓴다 |
 | 회귀 검증 | `tests/regression.py` | 합성 음원으로 검출률·분류율·오탐비 측정 |
 
 ## 여기 없는 것
