@@ -1,0 +1,817 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>발화 라벨러</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2c313b; --fg: #e6e9ef;
+    --dim: #8b93a3; --accent: #6ea8fe; --ok: #6bcB77; --no: #e06c75;
+    --target: #ffb454; --clinician: #6ea8fe; --unsure: #e06c75; --othervoice: #7cc4b2;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); height: 100vh;
+         display: grid; grid-template-columns: 1fr 380px; overflow: hidden;
+         font: 14px/1.5 -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px; gap: 10px; }
+  video { width: 100%; background: #000; border-radius: 8px; flex: 1; min-height: 0; object-fit: contain; }
+
+  #pick { flex: none; display: flex; align-items: center; gap: 10px;
+          background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+  #pick span { color: var(--dim); font-size: 12px; }
+  input[type=file] { color: var(--dim); font-size: 12px; max-width: 340px; }
+
+  #timeline { position: relative; height: 74px; background: var(--panel);
+              border: 1px solid var(--line); border-radius: 6px; cursor: pointer; flex: none; }
+  #timeline .cov { position: absolute; top: 0; bottom: 13px; background: rgba(107, 203, 119, .15);
+                   border-left: 1px solid var(--ok); border-right: 1px solid var(--ok); }
+  #timeline .lane { position: absolute; left: 0; right: 0; height: 9px; }
+  #timeline .seg { position: absolute; top: 0; height: 9px; min-width: 2px; border-radius: 2px; }
+  .seg.target { background: var(--target); }
+  .seg.clinician { background: var(--clinician); }
+  .seg.unsure { background: var(--unsure); }
+  .seg.othervoice { background: var(--othervoice); }
+  #playhead { position: absolute; top: 0; bottom: 13px; width: 2px; background: #fff; pointer-events: none; }
+  #covmark { position: absolute; top: 0; bottom: 13px; width: 2px; background: var(--ok); pointer-events: none; display: none; }
+  #ticks { position: absolute; bottom: 1px; left: 0; right: 0; height: 12px;
+           font-size: 9px; color: var(--dim); pointer-events: none; }
+  #ticks span { position: absolute; transform: translateX(-50%); }
+
+  #wave { width: 100%; height: 150px; flex: none; display: block; cursor: crosshair;
+           background: #171a20; border: 1px solid var(--line); border-radius: 6px; }
+  #wavehint { flex: none; color: var(--dim); font-size: 11.5px; }
+  #wavehint code { display: block; margin-top: 4px; color: var(--fg); background: #232833;
+                   border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px;
+                   font-size: 11.5px; user-select: all; overflow-x: auto; white-space: pre; }
+
+  #now { flex: none; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+         background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+  #now b { font-size: 18px; font-variant-numeric: tabular-nums; }
+  #nowmeta { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .tag { font-size: 11px; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); }
+  .tag.open { border-color: transparent; color: #16181d; font-weight: 600; }
+  .tag.open.target { background: var(--target); }
+  .tag.open.clinician { background: var(--clinician); }
+  .tag.open.unsure { background: var(--unsure); }
+  .tag.open.othervoice { background: var(--othervoice); }
+  .tag.open.cover { background: var(--ok); }
+
+  aside { border-left: 1px solid var(--line); display: flex; flex-direction: column;
+          background: var(--panel); min-height: 0; }
+  header { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 0 4px; font-size: 14px; }
+  header .meta { color: var(--dim); font-size: 12px; }
+  #controls { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 6px; flex-wrap: wrap; }
+  button { background: #262b35; color: var(--fg); border: 1px solid var(--line);
+           border-radius: 5px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.warn { background: #4a3a1f; border-color: #7a6432; }
+
+  #covwrap { flex: none; border-bottom: 1px solid var(--line); max-height: 128px; overflow-y: auto; }
+  #covwrap h2 { margin: 0; padding: 8px 12px 4px; font-size: 11px; color: var(--dim); font-weight: 600; }
+  #covwrap .empty { padding: 2px 12px 8px; color: var(--dim); font-size: 11.5px; }
+  .crow { display: grid; grid-template-columns: 1fr auto 20px; gap: 8px; align-items: baseline;
+          padding: 5px 12px; border-top: 1px solid #232833; cursor: pointer; font-size: 12px; }
+  .crow:hover { background: #232833; }
+  .crow .ct { font-variant-numeric: tabular-nums; color: var(--ok); }
+  .crow .cd { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .crow .x { color: var(--dim); text-align: center; font-size: 13px; }
+  .crow .x:hover { color: var(--no); }
+
+  #list { overflow-y: auto; flex: 1; }
+  .row { display: grid; grid-template-columns: 62px 42px 1fr 20px; gap: 8px; align-items: baseline;
+         padding: 7px 12px; border-bottom: 1px solid #232833; cursor: pointer; }
+  .row:hover { background: #232833; }
+  .row.cur { background: #2d3547; box-shadow: inset 3px 0 0 var(--accent); }
+  .row .t { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 13px; }
+  .row .d { color: var(--dim); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+  .row .c { font-size: 12px; }
+  .row .c::before { content: ''; display: inline-block; width: 8px; height: 8px;
+                    border-radius: 2px; margin-right: 6px; }
+  .row.target .c::before { background: var(--target); }
+  .row.clinician .c::before { background: var(--clinician); }
+  .row.unsure .c::before { background: var(--unsure); }
+  .row.othervoice .c::before { background: var(--othervoice); }
+  .row .x { color: var(--dim); text-align: center; font-size: 13px; }
+  .row .x:hover { color: var(--no); }
+
+  kbd { background: #2b3140; border: 1px solid var(--line); border-bottom-width: 2px;
+        border-radius: 4px; padding: 0 4px; font-size: 11px; }
+  #help { padding: 9px 12px; border-top: 1px solid var(--line); color: var(--dim);
+          font-size: 11.5px; line-height: 1.9; }
+  .banner { display: none; padding: 8px 12px; font-size: 12px; border-radius: 6px; flex: none; }
+  #err { background: #4a1f1f; color: #ffd7d7; }
+  #err code { display: block; margin-top: 5px; color: #ffb9b9; font-size: 11.5px; }
+  #note { background: #1f3a4a; color: #cfe9f7; }
+  #warn { background: #4a3a1f; color: #ffe9c2; }
+  #warn button { margin-left: 8px; }
+  #mode { background: #2a2140; color: #ded0ff; }
+  #mode b { color: #fff; font-variant-numeric: tabular-nums; }
+</style>
+
+<main>
+  <div id="pick">
+    <label>영상 <input type="file" id="file" accept="video/*,audio/*"></label>
+    <label>파형 <input type="file" id="envfile" accept=".wav,audio/wav,audio/x-wav"></label>
+    <span>파일은 브라우저 밖으로 나가지 않습니다.</span>
+  </div>
+  <div class="banner" id="err"></div>
+  <div class="banner" id="note"></div>
+  <div class="banner" id="warn"></div>
+  <div class="banner" id="mode"></div>
+  <video id="v" controls preload="metadata"></video>
+  <canvas id="wave"></canvas>
+  <div id="wavehint"></div>
+  <div id="timeline"><div id="playhead"></div><div id="covmark"></div><div id="ticks"></div></div>
+  <div id="now">
+    <b id="nowtime">--:--</b>
+    <span id="nowmeta"></span>
+    <span id="opentags"></span>
+  </div>
+</main>
+
+<aside>
+  <header>
+    <h1>발화 라벨러</h1>
+    <div class="meta" id="stats">파일을 고르면 시작합니다.</div>
+  </header>
+  <div id="controls">
+    <button id="expBtn">라벨 내보내기</button>
+  </div>
+  <div id="covwrap"><h2>들은 범위</h2><div id="covlist"></div></div>
+  <div id="list"></div>
+  <div id="help">
+    <kbd>1</kbd> 대상자 &nbsp; <kbd>2</kbd> 임상가 &nbsp; <kbd>3</kbd> 보류 &nbsp; <kbd>4</kbd> 제3자<br>
+    누르면 열리고 <b>같은 키로 닫습니다</b>. 참여자 발성이 아니면 표시하지 않습니다<br>
+    <kbd>C</kbd> 들은 범위 시작·끝 &nbsp; <kbd>Shift</kbd>+<kbd>C</kbd> 지금 자리의 범위 삭제<br>
+    <kbd>Esc</kbd> 열린 것 전부 취소<br>
+    <kbd>Space</kbd> 재생/정지 &nbsp; <kbd>,</kbd>/<kbd>.</kbd> 1초 &nbsp; <kbd>←</kbd>/<kbd>→</kbd> 10초<br>
+    <kbd>-</kbd>/<kbd>=</kbd> 배속 &nbsp; <kbd>Backspace</kbd> 마지막 구간 삭제<br>
+    <kbd>[</kbd>/<kbd>]</kbd> 파형 창 넓게·좁게 &nbsp; 파형을 누르면 그 시각으로<br>
+    <kbd>A</kbd> 미세 조정 — <kbd>[</kbd><kbd>]</kbd> 지점 이동, <kbd>,</kbd><kbd>.</kbd> 조정,<br>
+    &nbsp;&nbsp;&nbsp;<kbd>Space</kbd> 그 구간만 듣기, <kbd>Esc</kbd> 나가기
+  </div>
+</aside>
+
+<script>
+/* 발화 라벨러 — 검출 파이프라인과 무관한 순수 수동 라벨링 도구.
+   segments.json·VAD·임베딩 어디에도 의존하지 않으며 네트워크 요청을 하지 않는다. */
+
+const SCHEMA_VERSION = 2;   // 2 — 제3자 발성 범주가 생기며 무라벨의 뜻이 바뀌었다
+const MERGE_EPS = 0.5;      // 초 — 이만큼 이하로 떨어진 완료 범위는 이어 붙인다
+const IDLE_LIMIT = 60;      // 초 — 이만큼 입력이 없으면 작업 시간 계측을 멈춘다
+const EXPORT_NAG = 600;     // 초 — 마지막 내보내기 이후 작업이 이만큼 쌓이면 권한다
+
+/* 가르는 판정은 하나다 — 「누가 낸 발성인가」. 말인지 아닌지는 가르지 않고(그 판정은
+   도구의 표적이 아니다, AGENTS.md §2 ⑧), 잡음도 범주로 두지 않는다 — 어느 강도부터가
+   잡음인지에 기준을 세울 수 없고, 기준 없는 범주는 정보가 아니라 잡음을 더한다.
+   라벨이 없는 자리가 곧 「이 회기 참여자의 발성이 아니다」이며 강도와 무관하다.
+   제3자는 `4` 에 붙였다 — `3` 보류는 이미 손에 익었으므로 뜻을 바꾸지 않는다. */
+const CATS = [
+  { key: '1', id: 'target',      cls: 'target',     name: '대상자', rgb: '255,180,84' },
+  { key: '2', id: 'clinician',   cls: 'clinician',  name: '임상가', rgb: '110,168,254' },
+  { key: '3', id: 'unsure',      cls: 'unsure',     name: '보류',   rgb: '224,108,117' },
+  { key: '4', id: 'other_voice', cls: 'othervoice', name: '제3자',  rgb: '124,196,178' },
+];
+const BY_KEY = Object.fromEntries(CATS.map(c => [c.key, c]));
+const BY_ID  = Object.fromEntries(CATS.map(c => [c.id, c]));
+
+const v = document.getElementById('v');
+const tl = document.getElementById('timeline');
+const listEl = document.getElementById('list');
+const errEl = document.getElementById('err');
+const noteEl = document.getElementById('note');
+const warnEl = document.getElementById('warn');
+
+let media = null;          // { name, size, duration }
+let labels = [];           // { start, end, category } — 만든 순서
+let covered = [];          // { start, end } — 정규화된 오름차순
+let openSeg = {};          // category id -> 연 시각
+let openCover = null;      // 완료 범위를 연 시각 또는 null
+let elapsed = 0;           // 초 — 실제 작업 벽시계 시간
+let lastExport = 0;        // 마지막 내보내기 시점의 elapsed
+let lastActivity = 0;      // ms — 마지막 키·클릭 시각
+let armed = false;         // 경고를 확인하고 내보내기를 재시도하는 중인가
+let env = null;            // 파형 포락선 { rate, data: Float32Array, dur, peak }
+/* 미세 조정 모드 — 만든 구간의 경계를 나중에 다듬는다. 선택은 (라벨 번호, 어느 쪽 끝)
+   으로 들고 있는다. 시각으로 들면 다듬는 도중 순서가 바뀌어 선택이 튄다. */
+const FINE_STEP = 0.05;    // 초 — 한 번 누를 때 옮기는 폭
+const FINE_MIN_DUR = 0.05; // 초 — 구간이 이보다 짧아지지 않게 막는다
+let fine = { on: false, i: -1, edge: 'start', span: null, play: false };
+const SPANS = [4, 8, 20, 60, 180];   // 파형 창의 폭(초)
+let spanIdx = 2;
+
+const r2 = x => Math.round(x * 100) / 100;
+const fmt = t => {
+  if (!isFinite(t)) return '--:--';
+  const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = Math.floor(t % 60);
+  return (h ? String(h).padStart(2, '0') + ':' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+};
+const show = (el, html) => { el.innerHTML = html; el.style.display = 'block'; };
+const hide = el => { el.style.display = 'none'; };
+const total = rs => rs.reduce((a, r) => a + (r.end - r.start), 0);
+
+/* ---------- 저장 ---------- */
+const storeKey = () => 'utteranceLabeler:' + media.name + ':' + media.size;
+
+function save() {
+  if (!media) return;
+  try {
+    localStorage.setItem(storeKey(), JSON.stringify(
+      { schema_version: SCHEMA_VERSION, duration: media.duration, labels, covered, elapsed, lastExport }));
+  } catch (e) { /* 저장이 막혀도 라벨링 자체는 계속된다 */ }
+}
+
+function restore() {
+  let raw = null;
+  try { raw = localStorage.getItem(storeKey()); } catch (e) { return false; }
+  if (!raw) return false;
+  try {
+    const d = JSON.parse(raw);
+    labels = (Array.isArray(d.labels) ? d.labels : []).filter(l => BY_ID[l.category]);
+    covered = Array.isArray(d.covered) ? d.covered : [];
+    elapsed = d.elapsed || 0;
+    lastExport = d.lastExport || 0;
+    return labels.length > 0 || covered.length > 0;
+  } catch (e) { return false; }
+}
+
+/* ---------- 파일 ---------- */
+document.getElementById('file').onchange = e => {
+  const f = e.target.files[0];
+  e.target.blur();          // 포커스가 남으면 단축키가 파일 칸으로 들어간다
+  if (!f) return;
+  hide(errEl); hide(noteEl); hide(warnEl);
+  openSeg = {}; openCover = null; labels = []; covered = []; elapsed = 0; lastExport = 0;
+  env = null; document.getElementById('envfile').value = '';
+  media = { name: f.name, size: f.size, duration: 0 };
+  const had = restore();
+  v.src = URL.createObjectURL(f);
+  v.load();
+  if (had) show(noteEl, '이전 작업을 복원했습니다 — 라벨 ' + labels.length
+                       + '개, 들은 범위 ' + covered.length + '구간.');
+  render();
+};
+
+v.addEventListener('loadedmetadata', () => {
+  media.duration = v.duration;
+  hide(errEl);
+  render();
+});
+
+v.addEventListener('error', () => {
+  show(errEl, '이 파일을 브라우저가 재생하지 못합니다 — 코덱이 맞지 않을 수 있습니다. '
+            + '아래 명령으로 다시 인코딩한 파일을 쓰십시오.'
+            + '<code>ffmpeg -i 입력파일 -c:v libx264 -pix_fmt yuv420p -c:a aac 출력파일.mp4</code>');
+});
+
+/* ---------- 파형 ----------
+   ffmpeg 이 뽑아 둔 포락선 WAV 를 읽어 그린다. 파일이 없으면 파형만 비고
+   나머지 기능은 그대로 돈다 — 선택 입력이다. */
+const wave = document.getElementById('wave');
+const wctx = wave.getContext('2d');
+const hintEl = document.getElementById('wavehint');
+
+function parseWav(buf) {
+  const dv = new DataView(buf);
+  if (dv.getUint32(0) !== 0x52494646 || dv.getUint32(8) !== 0x57415645) throw new Error('WAV 파일이 아닙니다');
+  let off = 12, fmt = null, data = null;
+  while (off + 8 <= dv.byteLength) {
+    const id = String.fromCharCode(dv.getUint8(off), dv.getUint8(off + 1), dv.getUint8(off + 2), dv.getUint8(off + 3));
+    const sz = dv.getUint32(off + 4, true);
+    if (id === 'fmt ') fmt = { format: dv.getUint16(off + 8, true), ch: dv.getUint16(off + 10, true),
+                               rate: dv.getUint32(off + 12, true), bits: dv.getUint16(off + 22, true) };
+    else if (id === 'data') { data = { off: off + 8, size: Math.min(sz, dv.byteLength - off - 8) }; break; }
+    off += 8 + sz + (sz & 1);
+  }
+  if (!fmt || !data) throw new Error('WAV 구조를 읽지 못했습니다');
+  if (fmt.format !== 1 || fmt.bits !== 16) throw new Error('16비트 PCM 이어야 합니다');
+  const n = Math.floor(data.size / 2 / fmt.ch);
+  const src = data.off % 2 ? new Int16Array(buf.slice(data.off, data.off + n * fmt.ch * 2))
+                           : new Int16Array(buf, data.off, n * fmt.ch);
+  const out = new Float32Array(n);
+  let peak = 1e-6;
+  for (let i = 0; i < n; i++) {
+    let a = 0;
+    for (let c = 0; c < fmt.ch; c++) a += Math.abs(src[i * fmt.ch + c]);
+    a = a / fmt.ch / 32768;
+    out[i] = a;
+    if (a > peak) peak = a;
+  }
+  return { rate: fmt.rate, data: out, dur: n / fmt.rate, peak };
+}
+
+function envCommand() {
+  if (!media) return '';
+  const stem = media.name.replace(/\.[^.]+$/, '');
+  return 'ffmpeg -i "' + media.name + '" -af "aeval=abs(val(0)):c=same,lowpass=f=25,aresample=200" '
+       + '-ac 1 -c:a pcm_s16le "' + stem + '.env.wav"';
+}
+
+function paintHint() {
+  if (!media) { hintEl.textContent = ''; return; }
+  if (env) {
+    hintEl.innerHTML = '파형 ' + env.rate + 'Hz · ' + fmt(env.dur)
+      + ' &nbsp; <kbd>[</kbd>/<kbd>]</kbd> 창 넓게·좁게 (지금 ' + SPANS[spanIdx] + '초) &nbsp; 파형을 누르면 그 시각으로 갑니다';
+    return;
+  }
+  hintEl.innerHTML = '파형이 없습니다 — 소리의 시작과 끝을 눈으로 보려면 아래를 실행하고 '
+    + '나온 <code style="display:inline;padding:1px 4px">.env.wav</code> 를 「파형」에 물리십시오.'
+    + '<code>' + envCommand().replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</code>';
+}
+
+document.getElementById('envfile').onchange = async e => {
+  const f = e.target.files[0];
+  e.target.blur();
+  if (!f || !media) return;
+  try {
+    env = parseWav(await f.arrayBuffer());
+    if (media.duration && Math.abs(env.dur - media.duration) > 2)
+      show(warnEl, '파형 길이(' + fmt(env.dur) + ')가 영상 길이(' + fmt(media.duration)
+                 + ')와 다릅니다 — 다른 파일에서 뽑은 파형일 수 있습니다.');
+  } catch (err) {
+    env = null;
+    show(errEl, '파형 파일을 읽지 못했습니다 — ' + err.message + '.');
+  }
+  paintHint(); drawWave();
+};
+
+function drawWave() {
+  const W = wave.clientWidth, H = wave.clientHeight, dpr = devicePixelRatio || 1;
+  if (!W || !H) return;
+  if (wave.width !== Math.round(W * dpr)) { wave.width = Math.round(W * dpr); wave.height = Math.round(H * dpr); }
+  const g = wctx;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#171a20'; g.fillRect(0, 0, W, H);
+  if (!media || !media.duration) return;
+
+  const span = SPANS[spanIdx], t0 = v.currentTime - span / 2;
+  const X = t => (t - t0) / span * W;
+
+  for (const c of covered) {
+    const a = X(c.start), b = X(c.end);
+    if (b > 0 && a < W) { g.fillStyle = 'rgba(107,203,119,.13)'; g.fillRect(a, 0, Math.max(1, b - a), H); }
+  }
+
+  if (env) {
+    const mid = H / 2, amp = H / 2 - 8;
+    g.fillStyle = '#7d8ba3';
+    for (let px = 0; px < W; px++) {
+      let i0 = Math.floor((t0 + px / W * span) * env.rate);
+      let i1 = Math.ceil((t0 + (px + 1) / W * span) * env.rate);
+      if (i1 <= i0) i1 = i0 + 1;
+      if (i1 <= 0 || i0 >= env.data.length) continue;
+      i0 = Math.max(0, i0); i1 = Math.min(env.data.length, i1);
+      let m = 0;
+      for (let i = i0; i < i1; i++) if (env.data[i] > m) m = env.data[i];
+      const h = Math.max(0.6, m / env.peak * amp);
+      g.fillRect(px, mid - h, 1, h * 2);
+    }
+  }
+
+  CATS.forEach((cat, n) => {
+    for (const l of labels) {
+      if (l.category !== cat.id) continue;
+      const a = X(l.start), b = X(l.end);
+      if (b < 0 || a > W) continue;
+      g.fillStyle = 'rgba(' + cat.rgb + ',.16)'; g.fillRect(a, 0, Math.max(1, b - a), H);
+      g.fillStyle = 'rgb(' + cat.rgb + ')';     g.fillRect(a, 2 + n * 5, Math.max(1, b - a), 3);
+    }
+    const o = openSeg[cat.id];
+    if (o !== undefined) {
+      const a = X(o), b = X(v.currentTime);
+      g.fillStyle = 'rgba(' + cat.rgb + ',.10)'; g.fillRect(a, 0, Math.max(1, b - a), H);
+      g.fillStyle = 'rgb(' + cat.rgb + ')';     g.fillRect(a - 1, 0, 2, H);
+    }
+  });
+  if (openCover !== null) { g.fillStyle = '#6bcB77'; g.fillRect(X(openCover) - 1, 0, 2, H); }
+
+  if (fine.on) {
+    for (const pt of finePoints()) {
+      const x = X(pt.t);
+      if (x < -8 || x > W + 8) continue;
+      const sel = pt.i === fine.i && pt.edge === fine.edge;
+      const cat = BY_ID[labels[pt.i].category];
+      g.fillStyle = sel ? '#fff' : 'rgba(' + cat.rgb + ',.75)';
+      g.fillRect(x - (sel ? 1.5 : 0.5), 0, sel ? 3 : 1, H - 13);
+      if (sel) {
+        g.beginPath(); g.moveTo(x - 6, 0); g.lineTo(x + 6, 0); g.lineTo(x, 10); g.closePath(); g.fill();
+      }
+    }
+  }
+
+  const stepT = span <= 4 ? 0.5 : span <= 8 ? 1 : span <= 20 ? 2 : span <= 60 ? 5 : 15;
+  g.font = '10px -apple-system, sans-serif';
+  for (let t = Math.ceil(t0 / stepT) * stepT; t < t0 + span; t += stepT) {
+    if (t < 0) continue;
+    g.fillStyle = 'rgba(139,147,163,.25)'; g.fillRect(X(t), H - 13, 1, 13);
+    g.fillStyle = '#8b93a3'; g.fillText(fmt(t), X(t) + 3, H - 3);
+  }
+  g.fillStyle = '#fff'; g.fillRect(W / 2 - 1, 0, 2, H);
+}
+
+wave.onclick = e => {
+  if (!media || !media.duration) return;
+  const r = wave.getBoundingClientRect(), span = SPANS[spanIdx];
+  v.currentTime = Math.max(0, Math.min(media.duration,
+    v.currentTime - span / 2 + (e.clientX - r.left) / r.width * span));
+  drawWave();
+};
+(function loop() { if (media && !v.paused) { fineWatch(); drawWave(); } requestAnimationFrame(loop); })();
+
+/* ---------- 구간 ---------- */
+function toggleCat(cat) {
+  if (!media || !media.duration) return;
+  const t = v.currentTime;
+  if (openSeg[cat.id] === undefined) { openSeg[cat.id] = t; render(); return; }
+  const a = openSeg[cat.id], b = t;
+  delete openSeg[cat.id];
+  const start = Math.min(a, b), end = Math.max(a, b);
+  if (end - start > 0) labels.push({ start, end, category: cat.id });
+  save(); render();
+}
+
+function toggleCover() {
+  if (!media || !media.duration) return;
+  const t = v.currentTime;
+  if (openCover === null) { openCover = t; render(); return; }
+  const start = Math.min(openCover, t), end = Math.max(openCover, t);
+  openCover = null;
+  if (end - start > 0) { covered.push({ start, end }); normalizeCovered(); }
+  save(); render();
+}
+
+/* 겹치거나 MERGE_EPS 이하로 붙은 범위를 이어 붙이고 오름차순으로 만든다. */
+function normalizeCovered() {
+  covered.sort((x, y) => x.start - y.start);
+  const out = [];
+  for (const c of covered) {
+    const last = out[out.length - 1];
+    if (last && c.start - last.end <= MERGE_EPS) last.end = Math.max(last.end, c.end);
+    else out.push({ start: c.start, end: c.end });
+  }
+  covered = out;
+}
+
+function delLabel(i) { labels.splice(i, 1); save(); render(); }
+
+function delCovered(i) { covered.splice(i, 1); save(); render(); }
+
+/* 재생 머리가 든 범위를 지운다. 범위는 몇 개뿐이라 「마지막 것」보다 「지금 있는 곳」이
+   찾기 쉽다 — 라벨과 달리 만든 순서를 기억하고 있지 않기 때문이다. */
+function delCoveredAt() {
+  const t = v.currentTime;
+  const i = covered.findIndex(c => t >= c.start && t <= c.end);
+  if (i < 0) { show(noteEl, '재생 머리가 들은 범위 안에 있지 않습니다.'); return; }
+  delCovered(i);
+}
+
+/* ---------- 미세 조정 모드 ---------- */
+const finePoints = () =>
+  labels.flatMap((l, i) => [{ i, edge: 'start', t: l.start }, { i, edge: 'end', t: l.end }])
+        .sort((a, b) => a.t - b.t);
+
+const fineTime = () => {
+  const l = labels[fine.i];
+  return l ? (fine.edge === 'start' ? l.start : l.end) : 0;
+};
+
+function fineEnter() {
+  if (!media || !media.duration) { show(noteEl, '영상을 먼저 여십시오.'); return; }
+  if (!labels.length) { show(noteEl, '조정할 구간이 없습니다 — 먼저 라벨을 만드십시오.'); return; }
+  const pts = finePoints();
+  let best = pts[0];
+  for (const p of pts) if (Math.abs(p.t - v.currentTime) < Math.abs(best.t - v.currentTime)) best = p;
+  fine = { on: true, i: best.i, edge: best.edge, span: spanIdx, play: false };
+  if (spanIdx > 1) spanIdx = 1;          // 경계를 보려면 창이 좁아야 한다
+  v.pause();
+  v.currentTime = best.t;
+  render();
+}
+
+function fineExit() {
+  if (fine.span !== null) spanIdx = fine.span;
+  fine = { on: false, i: -1, edge: 'start', span: null, play: false };
+  hide(document.getElementById('mode'));
+  render();
+}
+
+function fineStep(dir) {
+  const pts = finePoints();
+  if (!pts.length) return fineExit();
+  let at = pts.findIndex(p => p.i === fine.i && p.edge === fine.edge);
+  if (at < 0) at = 0;
+  const next = pts[Math.max(0, Math.min(pts.length - 1, at + dir))];
+  fine.i = next.i; fine.edge = next.edge;
+  finePause();
+  v.currentTime = next.t;
+  render();
+}
+
+function finePause() {
+  fine.play = false;
+  if (!v.paused) v.pause();
+}
+
+/* 선택된 지점의 부모 구간을 처음부터 재생하고 끝에서 멈춘다. 멈춘 뒤에는 재생
+   머리를 선택된 지점으로 되돌린다 — 그래야 듣고·다듬고·다시 듣기가 이어진다. */
+function finePlay() {
+  const l = labels[fine.i];
+  if (!l) return;
+  if (!v.paused) { finePause(); v.currentTime = fineTime(); drawWave(); return; }
+  fine.play = true;
+  v.currentTime = l.start;
+  v.play();
+}
+
+function fineWatch() {
+  if (!fine.on || !fine.play) return;
+  const l = labels[fine.i];
+  if (!l) return;
+  if (v.currentTime >= l.end || v.ended) {
+    finePause();
+    v.currentTime = fineTime();
+    drawWave();
+  }
+}
+
+function fineNudge(d) {
+  const l = labels[fine.i];
+  if (!l) return;
+  const r3 = x => Math.round(x * 1000) / 1000;      // 잔차가 쌓이지 않게 한다
+  if (fine.edge === 'start') l.start = r3(Math.max(0, Math.min(l.end - FINE_MIN_DUR, l.start + d)));
+  else l.end = r3(Math.min(media.duration, Math.max(l.start + FINE_MIN_DUR, l.end + d)));
+  finePause();
+  v.currentTime = fineTime();
+  save(); render();
+}
+
+function cancelOpen() {
+  if (!Object.keys(openSeg).length && openCover === null) return;
+  openSeg = {}; openCover = null;
+  render();
+}
+
+/* ---------- 그리기 ---------- */
+function render() {
+  const dur = media && media.duration ? media.duration : 0;
+  const sorted = labels.map((l, i) => ({ l, i })).sort((p, q) => p.l.start - q.l.start);
+
+  listEl.innerHTML = '';
+  for (const { l, i } of sorted) {
+    const cat = BY_ID[l.category];
+    const row = document.createElement('div');
+    row.className = 'row ' + cat.cls + (fine.on && i === fine.i ? ' cur' : '');
+    row.innerHTML = '<div class="t">' + fmt(l.start) + '</div>'
+                  + '<div class="d">' + (l.end - l.start).toFixed(1) + 's</div>'
+                  + '<div class="c">' + cat.name + '</div>'
+                  + '<div class="x" title="삭제">&times;</div>';
+    row.onclick = () => { v.currentTime = l.start; v.play(); };
+    row.querySelector('.x').onclick = ev => { ev.stopPropagation(); delLabel(i); };
+    listEl.appendChild(row);
+  }
+
+  const cl = document.getElementById('covlist');
+  cl.innerHTML = '';
+  if (!covered.length) {
+    cl.innerHTML = '<div class="empty">아직 표시하지 않았습니다 — <kbd>C</kbd> 로 시작과 끝을 찍으십시오.</div>';
+  } else {
+    covered.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.className = 'crow';
+      row.innerHTML = '<div class="ct">' + fmt(c.start) + ' ~ ' + fmt(c.end) + '</div>'
+                    + '<div class="cd">' + fmt(c.end - c.start) + '</div>'
+                    + '<div class="x" title="이 범위를 지웁니다">&times;</div>';
+      row.onclick = () => { v.currentTime = c.start; drawWave(); };
+      row.querySelector('.x').onclick = ev => { ev.stopPropagation(); delCovered(i); };
+      cl.appendChild(row);
+    });
+  }
+
+  tl.querySelectorAll('.cov, .lane').forEach(e => e.remove());
+  if (dur) {
+    for (const c of covered) {
+      const d = document.createElement('div');
+      d.className = 'cov';
+      d.style.left = (c.start / dur * 100) + '%';
+      d.style.width = Math.max(0.05, (c.end - c.start) / dur * 100) + '%';
+      tl.insertBefore(d, tl.firstChild);
+    }
+    CATS.forEach((cat, n) => {
+      const lane = document.createElement('div');
+      lane.className = 'lane';
+      lane.style.top = (4 + n * 13) + 'px';
+      for (const l of labels) {
+        if (l.category !== cat.id) continue;
+        const d = document.createElement('div');
+        d.className = 'seg ' + cat.cls;
+        d.style.left = (l.start / dur * 100) + '%';
+        d.style.width = Math.max(0.08, (l.end - l.start) / dur * 100) + '%';
+        d.title = cat.name + ' · ' + fmt(l.start) + ' · ' + (l.end - l.start).toFixed(1) + 's';
+        lane.appendChild(d);
+      }
+      tl.appendChild(lane);
+    });
+    const ticks = document.getElementById('ticks');
+    ticks.innerHTML = '';
+    const step = dur > 3600 ? 600 : dur > 900 ? 300 : dur > 120 ? 60 : 10;
+    for (let t = 0; t < dur; t += step) {
+      const sp = document.createElement('span');
+      sp.style.left = (t / dur * 100) + '%';
+      sp.textContent = fmt(t);
+      ticks.appendChild(sp);
+    }
+    const cm = document.getElementById('covmark');
+    cm.style.display = openCover === null ? 'none' : 'block';
+    if (openCover !== null) cm.style.left = (openCover / dur * 100) + '%';
+  }
+
+  const tags = CATS.filter(c => openSeg[c.id] !== undefined)
+    .map(c => '<span class="tag open ' + c.cls + '">' + c.name + ' 열림 ' + fmt(openSeg[c.id]) + '</span>');
+  if (openCover !== null) tags.push('<span class="tag open cover">들은 범위 열림 ' + fmt(openCover) + '</span>');
+  document.getElementById('opentags').innerHTML = tags.join(' ');
+
+  document.getElementById('nowmeta').textContent =
+    '들은 범위 ' + fmt(total(covered)) + ' · 작업 ' + fmt(elapsed);
+
+  if (fine.on && labels[fine.i]) {
+    const l = labels[fine.i], cat = BY_ID[l.category], pts = finePoints();
+    const at = pts.findIndex(p => p.i === fine.i && p.edge === fine.edge);
+    show(document.getElementById('mode'),
+      '<b>미세 조정</b> — ' + cat.name + ' 구간의 ' + (fine.edge === 'start' ? '시작' : '끝')
+      + ' <b>' + fineTime().toFixed(2) + 's</b> (지점 ' + (at + 1) + '/' + pts.length + ')'
+      + ' &nbsp; <kbd>[</kbd><kbd>]</kbd> 지점 이동 &nbsp; <kbd>,</kbd><kbd>.</kbd> '
+      + FINE_STEP.toFixed(2) + '초씩 조정 &nbsp; <kbd>Space</kbd> 이 구간 듣기 &nbsp; <kbd>Esc</kbd> 나가기');
+  }
+
+  const counts = CATS.map(c => c.name + ' ' + labels.filter(l => l.category === c.id).length).join(' · ');
+  document.getElementById('stats').textContent = media
+    ? media.name + ' · 전체 ' + fmt(dur) + ' · 라벨 ' + labels.length + '개 — ' + counts
+    : '파일을 고르면 시작합니다.';
+  paintHint();
+  drawWave();
+}
+
+/* ---------- 재생 ---------- */
+tl.onclick = e => {
+  if (!media || !media.duration) return;
+  const r = tl.getBoundingClientRect();
+  v.currentTime = (e.clientX - r.left) / r.width * media.duration;
+};
+v.addEventListener('timeupdate', () => {
+  if (!media || !media.duration) return;
+  document.getElementById('playhead').style.left = (v.currentTime / media.duration * 100) + '%';
+  document.getElementById('nowtime').textContent = fmt(v.currentTime);
+  fineWatch();
+  if (v.paused) drawWave();
+});
+
+/* ---------- 작업 시간 계측 ----------
+   재생 중이거나 최근 IDLE_LIMIT 안에 입력이 있었던 초만 센다. */
+setInterval(() => {
+  if (!media) return;
+  const idle = (Date.now() - lastActivity) / 1000;
+  if (!v.paused || idle < IDLE_LIMIT) {
+    elapsed += 1;
+    document.getElementById('nowmeta').textContent =
+      '들은 범위 ' + fmt(total(covered)) + ' · 작업 ' + fmt(elapsed);
+    if (elapsed % 30 === 0) save();
+    if (elapsed - lastExport > EXPORT_NAG && warnEl.style.display !== 'block')
+      show(warnEl, '마지막 내보내기 이후 ' + fmt(elapsed - lastExport)
+                 + ' 작업했습니다. 세션을 끊기 전에 내보내 두십시오.');
+  }
+}, 1000);
+
+/* ---------- 내보내기 ---------- */
+function buildExport() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return {
+    schema_version: SCHEMA_VERSION,
+    video: media ? media.name : '',
+    duration: r2(media ? media.duration : 0),
+    created: d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+           + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()),
+    covered: covered.slice().sort((a, b) => a.start - b.start)
+                    .map(c => ({ start: r2(c.start), end: r2(c.end) })),
+    elapsed_wall_seconds: Math.round(elapsed),
+    labels: labels.slice().sort((a, b) => a.start - b.start)
+                  .map(l => ({ start: r2(l.start), end: r2(l.end), category: l.category })),
+  };
+}
+
+function exportWarnings() {
+  const w = [];
+  if (!covered.length)
+    w.push('들은 범위가 표시되지 않았습니다 — 라벨이 없는 시각이 「소리가 없었다」인지 '
+         + '「아직 안 들었다」인지 구별되지 않아 재현율을 계산할 수 없습니다.');
+  if (openCover !== null) w.push('들은 범위 하나가 열린 채 닫히지 않았습니다.');
+  const open = CATS.filter(c => openSeg[c.id] !== undefined).map(c => c.name);
+  if (open.length) w.push('닫히지 않은 구간이 있습니다 — ' + open.join(', ') + '.');
+  const orphan = labels.filter(l =>
+    !covered.some(c => l.start >= c.start - 0.01 && l.end <= c.end + 0.01));
+  if (covered.length && orphan.length)
+    w.push('들은 범위 밖에 라벨 ' + orphan.length + '개가 있습니다 — 범위를 지웠거나 '
+         + '잘못 표시했을 수 있습니다. 범위 밖의 라벨은 채점에서 버려집니다.');
+  return w;
+}
+
+document.getElementById('expBtn').onclick = () => {
+  if (!media) return;
+  const w = exportWarnings();
+  if (w.length && !armed) {
+    armed = true;
+    show(warnEl, w.join('<br>') + '<button id="anyway">그래도 내보내기</button>');
+    document.getElementById('anyway').onclick = () => document.getElementById('expBtn').click();
+    return;
+  }
+  armed = false;
+  hide(warnEl);
+  const stem = media.name.replace(/\.[^.]+$/, '');
+  const blob = new Blob([JSON.stringify(buildExport(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'labels_' + stem + '.json';
+  a.click();
+  lastExport = elapsed;
+  save();
+  show(noteEl, '내보냈습니다 — labels_' + stem + '.json');
+};
+
+/* ---------- 키보드 ---------- */
+/* 키는 `e.key` 가 아니라 물리 키(`e.code`)로 가른다 — `e.key` 는 자판 배열과 입력기에
+   따라 달라져, 한글 입력 상태에서는 `a` 가 `ㅁ` 으로 온다. 물리 키로 보면 한·영 상태와
+   무관하게 같은 자리를 누른 것으로 읽힌다. `<`·`>` 는 Shift 여부로 가른다. */
+const CODES = {
+  Space: ' ', Escape: 'Escape', Backspace: 'Backspace',
+  ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+  BracketLeft: '[', BracketRight: ']',
+  Minus: '-', NumpadSubtract: '-', Equal: '=', NumpadAdd: '=',
+  KeyA: 'a',
+};
+function keyId(e) {
+  if (e.code === 'KeyC')   return e.shiftKey ? 'C' : 'c';
+  if (e.code === 'Comma')  return e.shiftKey ? '<' : ',';
+  if (e.code === 'Period') return e.shiftKey ? '>' : '.';
+  if (CODES[e.code]) return CODES[e.code];
+  const d = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  return d ? d[1] : null;
+}
+
+/* 캡처 단계에서 받는다 — 버블까지 두면 <video> 의 기본 컨트롤이 Space·화살표를 먼저
+   처리해 우리 핸들러와 두 번 작동한다. 우리가 쓰는 키는 stopPropagation 으로 막는다.
+   글자를 넣는 칸에서만 비켜서고, 파일 칸은 글자를 넣지 않으므로 비켜서지 않는다 —
+   비켜서면 파일을 고른 직후 단축키가 전부 죽고 Space 가 파일 창을 다시 연다. */
+addEventListener('keydown', e => {
+  const el = e.target;
+  if (el instanceof HTMLElement && (el.isContentEditable || el.tagName === 'TEXTAREA'
+      || (el.tagName === 'INPUT' && el.type !== 'file'))) return;
+  lastActivity = Date.now();
+  const k = keyId(e);
+  if (k === null) return;
+
+  /* 재생 조작은 두 모드에서 같다 */
+  const nav = {
+    ' ': () => v.paused ? v.play() : v.pause(),
+    ',': () => v.currentTime -= 1, '.': () => v.currentTime += 1,
+    'ArrowLeft': () => v.currentTime -= 10, 'ArrowRight': () => v.currentTime += 10,
+    '-': () => v.playbackRate = Math.max(0.5, Math.round((v.playbackRate - 0.25) * 100) / 100),
+    '=': () => v.playbackRate = Math.min(3.0, Math.round((v.playbackRate + 0.25) * 100) / 100),
+  };
+
+  /* 미세 조정 모드에서는 구간을 만들거나 지우는 키를 받지 않는다 — 다듬는 중에
+     실수로 새 구간이 열리면 무엇을 고치고 있었는지 잃는다. */
+  if (fine.on) {
+    /* 다듬기는 Shift 여부와 무관하게 같은 물리 키로 받는다. `<` 와 `,` 는 같은 키에
+       Shift 로만 갈리는데, 입력기나 자판에 따라 Shift 가 실려 오지 않으면 1초 점프로
+       새어 나간다. 모드 안에서는 1초 점프를 두지 않아 겹칠 자리를 없앤다. */
+    const fmap = Object.assign({}, nav, {
+      ' ': () => finePlay(),
+      '[': () => fineStep(-1), ']': () => fineStep(1),
+      ',': () => fineNudge(-FINE_STEP), '<': () => fineNudge(-FINE_STEP),
+      '.': () => fineNudge(FINE_STEP),  '>': () => fineNudge(FINE_STEP),
+      'Escape': () => fineExit(),
+    });
+    if (fmap[k]) { e.preventDefault(); e.stopPropagation(); fmap[k](); }
+    return;
+  }
+
+  if (BY_KEY[k]) { e.preventDefault(); e.stopPropagation(); toggleCat(BY_KEY[k]); return; }
+  const map = Object.assign({}, nav, {
+    'c': () => toggleCover(), 'C': () => delCoveredAt(),
+    'a': () => fineEnter(),
+    'Escape': () => cancelOpen(),
+    'Backspace': () => { if (labels.length) delLabel(labels.length - 1); },
+    '[': () => { spanIdx = Math.min(SPANS.length - 1, spanIdx + 1); paintHint(); drawWave(); },
+    ']': () => { spanIdx = Math.max(0, spanIdx - 1); paintHint(); drawWave(); },
+  });
+  if (map[k]) { e.preventDefault(); e.stopPropagation(); map[k](); }
+}, true);
+addEventListener('mousedown', () => lastActivity = Date.now());
+
+/* 자동 검증이 내부 상태를 직접 조회하기 위한 통로다. */
+window.__labeler = { buildExport, exportWarnings, parseWav, drawWave,
+  fine: () => ({ on: fine.on, i: fine.i, edge: fine.edge, t: fine.on ? fineTime() : null,
+                 n: finePoints().length, play: fine.play }),
+  state: () => ({ labels, covered, openSeg, openCover, elapsed,
+                  env: env && { rate: env.rate, dur: env.dur, n: env.data.length }, span: SPANS[spanIdx] }) };
+
+render();
+</script>
