@@ -5,7 +5,7 @@
   :root {
     --bg: #14161a; --panel: #1c1f26; --line: #2c313b; --fg: #e6e9ef;
     --dim: #8b93a3; --accent: #6ea8fe; --ok: #6bcB77; --no: #e06c75;
-    --target: #ffb454; --clinician: #6ea8fe; --unsure: #e06c75;
+    --target: #ffb454; --clinician: #6ea8fe; --unsure: #e06c75; --othervoice: #7cc4b2;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); height: 100vh;
@@ -28,6 +28,7 @@
   .seg.target { background: var(--target); }
   .seg.clinician { background: var(--clinician); }
   .seg.unsure { background: var(--unsure); }
+  .seg.othervoice { background: var(--othervoice); }
   #playhead { position: absolute; top: 0; bottom: 13px; width: 2px; background: #fff; pointer-events: none; }
   #covmark { position: absolute; top: 0; bottom: 13px; width: 2px; background: var(--ok); pointer-events: none; display: none; }
   #ticks { position: absolute; bottom: 1px; left: 0; right: 0; height: 12px;
@@ -50,6 +51,7 @@
   .tag.open.target { background: var(--target); }
   .tag.open.clinician { background: var(--clinician); }
   .tag.open.unsure { background: var(--unsure); }
+  .tag.open.othervoice { background: var(--othervoice); }
   .tag.open.cover { background: var(--ok); }
 
   aside { border-left: 1px solid var(--line); display: flex; flex-direction: column;
@@ -87,6 +89,7 @@
   .row.target .c::before { background: var(--target); }
   .row.clinician .c::before { background: var(--clinician); }
   .row.unsure .c::before { background: var(--unsure); }
+  .row.othervoice .c::before { background: var(--othervoice); }
   .row .x { color: var(--dim); text-align: center; font-size: 13px; }
   .row .x:hover { color: var(--no); }
 
@@ -136,8 +139,8 @@
   <div id="covwrap"><h2>들은 범위</h2><div id="covlist"></div></div>
   <div id="list"></div>
   <div id="help">
-    <kbd>1</kbd> 대상자 &nbsp; <kbd>2</kbd> 임상가 &nbsp; <kbd>3</kbd> 보류<br>
-    누르면 열리고 <b>같은 키로 닫습니다</b>. 사람 발성이 아니면 표시하지 않습니다<br>
+    <kbd>1</kbd> 대상자 &nbsp; <kbd>2</kbd> 임상가 &nbsp; <kbd>3</kbd> 보류 &nbsp; <kbd>4</kbd> 제3자<br>
+    누르면 열리고 <b>같은 키로 닫습니다</b>. 참여자 발성이 아니면 표시하지 않습니다<br>
     <kbd>C</kbd> 들은 범위 시작·끝 &nbsp; <kbd>Shift</kbd>+<kbd>C</kbd> 지금 자리의 범위 삭제<br>
     <kbd>Esc</kbd> 열린 것 전부 취소<br>
     <kbd>Space</kbd> 재생/정지 &nbsp; <kbd>,</kbd>/<kbd>.</kbd> 1초 &nbsp; <kbd>←</kbd>/<kbd>→</kbd> 10초<br>
@@ -152,7 +155,7 @@
 /* 발화 라벨러 — 검출 파이프라인과 무관한 순수 수동 라벨링 도구.
    segments.json·VAD·임베딩 어디에도 의존하지 않으며 네트워크 요청을 하지 않는다. */
 
-const SCHEMA_VERSION = 1;   // 내보내기 스키마 판. 라벨링이 도는 동안 동결한다
+const SCHEMA_VERSION = 2;   // 2 — 제3자 발성 범주가 생기며 무라벨의 뜻이 바뀌었다
 const MERGE_EPS = 0.5;      // 초 — 이만큼 이하로 떨어진 완료 범위는 이어 붙인다
 const IDLE_LIMIT = 60;      // 초 — 이만큼 입력이 없으면 작업 시간 계측을 멈춘다
 const EXPORT_NAG = 600;     // 초 — 마지막 내보내기 이후 작업이 이만큼 쌓이면 권한다
@@ -160,11 +163,13 @@ const EXPORT_NAG = 600;     // 초 — 마지막 내보내기 이후 작업이 �
 /* 가르는 판정은 하나다 — 「누가 낸 발성인가」. 말인지 아닌지는 가르지 않고(그 판정은
    도구의 표적이 아니다, AGENTS.md §2 ⑧), 잡음도 범주로 두지 않는다 — 어느 강도부터가
    잡음인지에 기준을 세울 수 없고, 기준 없는 범주는 정보가 아니라 잡음을 더한다.
-   라벨이 없는 자리가 곧 「사람의 발성이 아니다」이며 강도와 무관하다. */
+   라벨이 없는 자리가 곧 「이 회기 참여자의 발성이 아니다」이며 강도와 무관하다.
+   제3자는 `4` 에 붙였다 — `3` 보류는 이미 손에 익었으므로 뜻을 바꾸지 않는다. */
 const CATS = [
-  { key: '1', id: 'target',    cls: 'target',    name: '대상자', rgb: '255,180,84' },
-  { key: '2', id: 'clinician', cls: 'clinician', name: '임상가', rgb: '110,168,254' },
-  { key: '3', id: 'unsure',    cls: 'unsure',    name: '보류',   rgb: '224,108,117' },
+  { key: '1', id: 'target',      cls: 'target',     name: '대상자', rgb: '255,180,84' },
+  { key: '2', id: 'clinician',   cls: 'clinician',  name: '임상가', rgb: '110,168,254' },
+  { key: '3', id: 'unsure',      cls: 'unsure',     name: '보류',   rgb: '224,108,117' },
+  { key: '4', id: 'other_voice', cls: 'othervoice', name: '제3자',  rgb: '124,196,178' },
 ];
 const BY_KEY = Object.fromEntries(CATS.map(c => [c.key, c]));
 const BY_ID  = Object.fromEntries(CATS.map(c => [c.id, c]));
@@ -593,7 +598,7 @@ function render() {
     CATS.forEach((cat, n) => {
       const lane = document.createElement('div');
       lane.className = 'lane';
-      lane.style.top = (5 + n * 15) + 'px';
+      lane.style.top = (4 + n * 13) + 'px';
       for (const l of labels) {
         if (l.category !== cat.id) continue;
         const d = document.createElement('div');
