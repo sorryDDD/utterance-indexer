@@ -63,10 +63,22 @@
   button:hover { border-color: var(--accent); }
   button.warn { background: #4a3a1f; border-color: #7a6432; }
 
+  #covwrap { flex: none; border-bottom: 1px solid var(--line); max-height: 128px; overflow-y: auto; }
+  #covwrap h2 { margin: 0; padding: 8px 12px 4px; font-size: 11px; color: var(--dim); font-weight: 600; }
+  #covwrap .empty { padding: 2px 12px 8px; color: var(--dim); font-size: 11.5px; }
+  .crow { display: grid; grid-template-columns: 1fr auto 20px; gap: 8px; align-items: baseline;
+          padding: 5px 12px; border-top: 1px solid #232833; cursor: pointer; font-size: 12px; }
+  .crow:hover { background: #232833; }
+  .crow .ct { font-variant-numeric: tabular-nums; color: var(--ok); }
+  .crow .cd { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .crow .x { color: var(--dim); text-align: center; font-size: 13px; }
+  .crow .x:hover { color: var(--no); }
+
   #list { overflow-y: auto; flex: 1; }
   .row { display: grid; grid-template-columns: 62px 42px 1fr 20px; gap: 8px; align-items: baseline;
          padding: 7px 12px; border-bottom: 1px solid #232833; cursor: pointer; }
   .row:hover { background: #232833; }
+  .row.cur { background: #2d3547; box-shadow: inset 3px 0 0 var(--accent); }
   .row .t { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 13px; }
   .row .d { color: var(--dim); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
   .row .c { font-size: 12px; }
@@ -88,6 +100,8 @@
   #note { background: #1f3a4a; color: #cfe9f7; }
   #warn { background: #4a3a1f; color: #ffe9c2; }
   #warn button { margin-left: 8px; }
+  #mode { background: #2a2140; color: #ded0ff; }
+  #mode b { color: #fff; font-variant-numeric: tabular-nums; }
 </style>
 
 <main>
@@ -99,6 +113,7 @@
   <div class="banner" id="err"></div>
   <div class="banner" id="note"></div>
   <div class="banner" id="warn"></div>
+  <div class="banner" id="mode"></div>
   <video id="v" controls preload="metadata"></video>
   <canvas id="wave"></canvas>
   <div id="wavehint"></div>
@@ -118,14 +133,18 @@
   <div id="controls">
     <button id="expBtn">라벨 내보내기</button>
   </div>
+  <div id="covwrap"><h2>들은 범위</h2><div id="covlist"></div></div>
   <div id="list"></div>
   <div id="help">
     <kbd>1</kbd> 대상자 &nbsp; <kbd>2</kbd> 임상가 &nbsp; <kbd>3</kbd> 보류<br>
     누르면 열리고 <b>같은 키로 닫습니다</b>. 사람 발성이 아니면 표시하지 않습니다<br>
-    <kbd>C</kbd> 들은 범위 시작·끝 &nbsp; <kbd>Esc</kbd> 열린 것 전부 취소<br>
-    <kbd>Space</kbd> 재생/정지 &nbsp; <kbd>,</kbd>/<kbd>.</kbd> 3초 &nbsp; <kbd>←</kbd>/<kbd>→</kbd> 10초<br>
+    <kbd>C</kbd> 들은 범위 시작·끝 &nbsp; <kbd>Shift</kbd>+<kbd>C</kbd> 지금 자리의 범위 삭제<br>
+    <kbd>Esc</kbd> 열린 것 전부 취소<br>
+    <kbd>Space</kbd> 재생/정지 &nbsp; <kbd>,</kbd>/<kbd>.</kbd> 1초 &nbsp; <kbd>←</kbd>/<kbd>→</kbd> 10초<br>
     <kbd>-</kbd>/<kbd>=</kbd> 배속 &nbsp; <kbd>Backspace</kbd> 마지막 구간 삭제<br>
-    <kbd>[</kbd>/<kbd>]</kbd> 파형 창 넓게·좁게 &nbsp; 파형을 누르면 그 시각으로
+    <kbd>[</kbd>/<kbd>]</kbd> 파형 창 넓게·좁게 &nbsp; 파형을 누르면 그 시각으로<br>
+    <kbd>A</kbd> 미세 조정 — <kbd>[</kbd><kbd>]</kbd> 지점 이동, <kbd>&lt;</kbd><kbd>&gt;</kbd> 조정,<br>
+    &nbsp;&nbsp;&nbsp;<kbd>Space</kbd> 그 구간만 듣기, <kbd>Esc</kbd> 나가기
   </div>
 </aside>
 
@@ -167,6 +186,11 @@ let lastExport = 0;        // 마지막 내보내기 시점의 elapsed
 let lastActivity = 0;      // ms — 마지막 키·클릭 시각
 let armed = false;         // 경고를 확인하고 내보내기를 재시도하는 중인가
 let env = null;            // 파형 포락선 { rate, data: Float32Array, dur, peak }
+/* 미세 조정 모드 — 만든 구간의 경계를 나중에 다듬는다. 선택은 (라벨 번호, 어느 쪽 끝)
+   으로 들고 있는다. 시각으로 들면 다듬는 도중 순서가 바뀌어 선택이 튄다. */
+const FINE_STEP = 0.05;    // 초 — 한 번 누를 때 옮기는 폭
+const FINE_MIN_DUR = 0.05; // 초 — 구간이 이보다 짧아지지 않게 막는다
+let fine = { on: false, i: -1, edge: 'start', span: null, play: false };
 const SPANS = [4, 8, 20, 60, 180];   // 파형 창의 폭(초)
 let spanIdx = 2;
 
@@ -208,6 +232,7 @@ function restore() {
 /* ---------- 파일 ---------- */
 document.getElementById('file').onchange = e => {
   const f = e.target.files[0];
+  e.target.blur();          // 포커스가 남으면 단축키가 파일 칸으로 들어간다
   if (!f) return;
   hide(errEl); hide(noteEl); hide(warnEl);
   openSeg = {}; openCover = null; labels = []; covered = []; elapsed = 0; lastExport = 0;
@@ -290,6 +315,7 @@ function paintHint() {
 
 document.getElementById('envfile').onchange = async e => {
   const f = e.target.files[0];
+  e.target.blur();
   if (!f || !media) return;
   try {
     env = parseWav(await f.arrayBuffer());
@@ -353,6 +379,20 @@ function drawWave() {
   });
   if (openCover !== null) { g.fillStyle = '#6bcB77'; g.fillRect(X(openCover) - 1, 0, 2, H); }
 
+  if (fine.on) {
+    for (const pt of finePoints()) {
+      const x = X(pt.t);
+      if (x < -8 || x > W + 8) continue;
+      const sel = pt.i === fine.i && pt.edge === fine.edge;
+      const cat = BY_ID[labels[pt.i].category];
+      g.fillStyle = sel ? '#fff' : 'rgba(' + cat.rgb + ',.75)';
+      g.fillRect(x - (sel ? 1.5 : 0.5), 0, sel ? 3 : 1, H - 13);
+      if (sel) {
+        g.beginPath(); g.moveTo(x - 6, 0); g.lineTo(x + 6, 0); g.lineTo(x, 10); g.closePath(); g.fill();
+      }
+    }
+  }
+
   const stepT = span <= 4 ? 0.5 : span <= 8 ? 1 : span <= 20 ? 2 : span <= 60 ? 5 : 15;
   g.font = '10px -apple-system, sans-serif';
   for (let t = Math.ceil(t0 / stepT) * stepT; t < t0 + span; t += stepT) {
@@ -370,7 +410,7 @@ wave.onclick = e => {
     v.currentTime - span / 2 + (e.clientX - r.left) / r.width * span));
   drawWave();
 };
-(function loop() { if (media && !v.paused) drawWave(); requestAnimationFrame(loop); })();
+(function loop() { if (media && !v.paused) { fineWatch(); drawWave(); } requestAnimationFrame(loop); })();
 
 /* ---------- 구간 ---------- */
 function toggleCat(cat) {
@@ -408,6 +448,97 @@ function normalizeCovered() {
 
 function delLabel(i) { labels.splice(i, 1); save(); render(); }
 
+function delCovered(i) { covered.splice(i, 1); save(); render(); }
+
+/* 재생 머리가 든 범위를 지운다. 범위는 몇 개뿐이라 「마지막 것」보다 「지금 있는 곳」이
+   찾기 쉽다 — 라벨과 달리 만든 순서를 기억하고 있지 않기 때문이다. */
+function delCoveredAt() {
+  const t = v.currentTime;
+  const i = covered.findIndex(c => t >= c.start && t <= c.end);
+  if (i < 0) { show(noteEl, '재생 머리가 들은 범위 안에 있지 않습니다.'); return; }
+  delCovered(i);
+}
+
+/* ---------- 미세 조정 모드 ---------- */
+const finePoints = () =>
+  labels.flatMap((l, i) => [{ i, edge: 'start', t: l.start }, { i, edge: 'end', t: l.end }])
+        .sort((a, b) => a.t - b.t);
+
+const fineTime = () => {
+  const l = labels[fine.i];
+  return l ? (fine.edge === 'start' ? l.start : l.end) : 0;
+};
+
+function fineEnter() {
+  if (!media || !media.duration) { show(noteEl, '영상을 먼저 여십시오.'); return; }
+  if (!labels.length) { show(noteEl, '조정할 구간이 없습니다 — 먼저 라벨을 만드십시오.'); return; }
+  const pts = finePoints();
+  let best = pts[0];
+  for (const p of pts) if (Math.abs(p.t - v.currentTime) < Math.abs(best.t - v.currentTime)) best = p;
+  fine = { on: true, i: best.i, edge: best.edge, span: spanIdx, play: false };
+  if (spanIdx > 1) spanIdx = 1;          // 경계를 보려면 창이 좁아야 한다
+  v.pause();
+  v.currentTime = best.t;
+  render();
+}
+
+function fineExit() {
+  if (fine.span !== null) spanIdx = fine.span;
+  fine = { on: false, i: -1, edge: 'start', span: null, play: false };
+  hide(document.getElementById('mode'));
+  render();
+}
+
+function fineStep(dir) {
+  const pts = finePoints();
+  if (!pts.length) return fineExit();
+  let at = pts.findIndex(p => p.i === fine.i && p.edge === fine.edge);
+  if (at < 0) at = 0;
+  const next = pts[Math.max(0, Math.min(pts.length - 1, at + dir))];
+  fine.i = next.i; fine.edge = next.edge;
+  finePause();
+  v.currentTime = next.t;
+  render();
+}
+
+function finePause() {
+  fine.play = false;
+  if (!v.paused) v.pause();
+}
+
+/* 선택된 지점의 부모 구간을 처음부터 재생하고 끝에서 멈춘다. 멈춘 뒤에는 재생
+   머리를 선택된 지점으로 되돌린다 — 그래야 듣고·다듬고·다시 듣기가 이어진다. */
+function finePlay() {
+  const l = labels[fine.i];
+  if (!l) return;
+  if (!v.paused) { finePause(); v.currentTime = fineTime(); drawWave(); return; }
+  fine.play = true;
+  v.currentTime = l.start;
+  v.play();
+}
+
+function fineWatch() {
+  if (!fine.on || !fine.play) return;
+  const l = labels[fine.i];
+  if (!l) return;
+  if (v.currentTime >= l.end || v.ended) {
+    finePause();
+    v.currentTime = fineTime();
+    drawWave();
+  }
+}
+
+function fineNudge(d) {
+  const l = labels[fine.i];
+  if (!l) return;
+  const r3 = x => Math.round(x * 1000) / 1000;      // 잔차가 쌓이지 않게 한다
+  if (fine.edge === 'start') l.start = r3(Math.max(0, Math.min(l.end - FINE_MIN_DUR, l.start + d)));
+  else l.end = r3(Math.min(media.duration, Math.max(l.start + FINE_MIN_DUR, l.end + d)));
+  finePause();
+  v.currentTime = fineTime();
+  save(); render();
+}
+
 function cancelOpen() {
   if (!Object.keys(openSeg).length && openCover === null) return;
   openSeg = {}; openCover = null;
@@ -423,7 +554,7 @@ function render() {
   for (const { l, i } of sorted) {
     const cat = BY_ID[l.category];
     const row = document.createElement('div');
-    row.className = 'row ' + cat.cls;
+    row.className = 'row ' + cat.cls + (fine.on && i === fine.i ? ' cur' : '');
     row.innerHTML = '<div class="t">' + fmt(l.start) + '</div>'
                   + '<div class="d">' + (l.end - l.start).toFixed(1) + 's</div>'
                   + '<div class="c">' + cat.name + '</div>'
@@ -431,6 +562,23 @@ function render() {
     row.onclick = () => { v.currentTime = l.start; v.play(); };
     row.querySelector('.x').onclick = ev => { ev.stopPropagation(); delLabel(i); };
     listEl.appendChild(row);
+  }
+
+  const cl = document.getElementById('covlist');
+  cl.innerHTML = '';
+  if (!covered.length) {
+    cl.innerHTML = '<div class="empty">아직 표시하지 않았습니다 — <kbd>C</kbd> 로 시작과 끝을 찍으십시오.</div>';
+  } else {
+    covered.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.className = 'crow';
+      row.innerHTML = '<div class="ct">' + fmt(c.start) + ' ~ ' + fmt(c.end) + '</div>'
+                    + '<div class="cd">' + fmt(c.end - c.start) + '</div>'
+                    + '<div class="x" title="이 범위를 지웁니다">&times;</div>';
+      row.onclick = () => { v.currentTime = c.start; drawWave(); };
+      row.querySelector('.x').onclick = ev => { ev.stopPropagation(); delCovered(i); };
+      cl.appendChild(row);
+    });
   }
 
   tl.querySelectorAll('.cov, .lane').forEach(e => e.remove());
@@ -479,6 +627,16 @@ function render() {
   document.getElementById('nowmeta').textContent =
     '들은 범위 ' + fmt(total(covered)) + ' · 작업 ' + fmt(elapsed);
 
+  if (fine.on && labels[fine.i]) {
+    const l = labels[fine.i], cat = BY_ID[l.category], pts = finePoints();
+    const at = pts.findIndex(p => p.i === fine.i && p.edge === fine.edge);
+    show(document.getElementById('mode'),
+      '<b>미세 조정</b> — ' + cat.name + ' 구간의 ' + (fine.edge === 'start' ? '시작' : '끝')
+      + ' <b>' + fineTime().toFixed(2) + 's</b> (지점 ' + (at + 1) + '/' + pts.length + ')'
+      + ' &nbsp; <kbd>[</kbd><kbd>]</kbd> 지점 이동 &nbsp; <kbd>&lt;</kbd><kbd>&gt;</kbd> '
+      + FINE_STEP.toFixed(2) + '초씩 조정 &nbsp; <kbd>Space</kbd> 이 구간 듣기 &nbsp; <kbd>Esc</kbd> 나가기');
+  }
+
   const counts = CATS.map(c => c.name + ' ' + labels.filter(l => l.category === c.id).length).join(' · ');
   document.getElementById('stats').textContent = media
     ? media.name + ' · 전체 ' + fmt(dur) + ' · 라벨 ' + labels.length + '개 — ' + counts
@@ -497,6 +655,7 @@ v.addEventListener('timeupdate', () => {
   if (!media || !media.duration) return;
   document.getElementById('playhead').style.left = (v.currentTime / media.duration * 100) + '%';
   document.getElementById('nowtime').textContent = fmt(v.currentTime);
+  fineWatch();
   if (v.paused) drawWave();
 });
 
@@ -541,6 +700,11 @@ function exportWarnings() {
   if (openCover !== null) w.push('들은 범위 하나가 열린 채 닫히지 않았습니다.');
   const open = CATS.filter(c => openSeg[c.id] !== undefined).map(c => c.name);
   if (open.length) w.push('닫히지 않은 구간이 있습니다 — ' + open.join(', ') + '.');
+  const orphan = labels.filter(l =>
+    !covered.some(c => l.start >= c.start - 0.01 && l.end <= c.end + 0.01));
+  if (covered.length && orphan.length)
+    w.push('들은 범위 밖에 라벨 ' + orphan.length + '개가 있습니다 — 범위를 지웠거나 '
+         + '잘못 표시했을 수 있습니다. 범위 밖의 라벨은 채점에서 버려집니다.');
   return w;
 }
 
@@ -567,29 +731,76 @@ document.getElementById('expBtn').onclick = () => {
 };
 
 /* ---------- 키보드 ---------- */
+/* 키는 `e.key` 가 아니라 물리 키(`e.code`)로 가른다 — `e.key` 는 자판 배열과 입력기에
+   따라 달라져, 한글 입력 상태에서는 `a` 가 `ㅁ` 으로 온다. 물리 키로 보면 한·영 상태와
+   무관하게 같은 자리를 누른 것으로 읽힌다. `<`·`>` 는 Shift 여부로 가른다. */
+const CODES = {
+  Space: ' ', Escape: 'Escape', Backspace: 'Backspace',
+  ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+  BracketLeft: '[', BracketRight: ']',
+  Minus: '-', NumpadSubtract: '-', Equal: '=', NumpadAdd: '=',
+  KeyA: 'a',
+};
+function keyId(e) {
+  if (e.code === 'KeyC')   return e.shiftKey ? 'C' : 'c';
+  if (e.code === 'Comma')  return e.shiftKey ? '<' : ',';
+  if (e.code === 'Period') return e.shiftKey ? '>' : '.';
+  if (CODES[e.code]) return CODES[e.code];
+  const d = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  return d ? d[1] : null;
+}
+
+/* 캡처 단계에서 받는다 — 버블까지 두면 <video> 의 기본 컨트롤이 Space·화살표를 먼저
+   처리해 우리 핸들러와 두 번 작동한다. 우리가 쓰는 키는 stopPropagation 으로 막는다.
+   글자를 넣는 칸에서만 비켜서고, 파일 칸은 글자를 넣지 않으므로 비켜서지 않는다 —
+   비켜서면 파일을 고른 직후 단축키가 전부 죽고 Space 가 파일 창을 다시 연다. */
 addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
+  const el = e.target;
+  if (el instanceof HTMLElement && (el.isContentEditable || el.tagName === 'TEXTAREA'
+      || (el.tagName === 'INPUT' && el.type !== 'file'))) return;
   lastActivity = Date.now();
-  const k = e.key;
-  if (BY_KEY[k]) { e.preventDefault(); toggleCat(BY_KEY[k]); return; }
-  const map = {
-    'c': () => toggleCover(), 'C': () => toggleCover(),
-    'Escape': () => cancelOpen(),
+  const k = keyId(e);
+  if (k === null) return;
+
+  /* 재생 조작은 두 모드에서 같다 */
+  const nav = {
     ' ': () => v.paused ? v.play() : v.pause(),
-    ',': () => v.currentTime -= 3, '.': () => v.currentTime += 3,
+    ',': () => v.currentTime -= 1, '.': () => v.currentTime += 1,
     'ArrowLeft': () => v.currentTime -= 10, 'ArrowRight': () => v.currentTime += 10,
     '-': () => v.playbackRate = Math.max(0.5, Math.round((v.playbackRate - 0.25) * 100) / 100),
     '=': () => v.playbackRate = Math.min(3.0, Math.round((v.playbackRate + 0.25) * 100) / 100),
+  };
+
+  /* 미세 조정 모드에서는 구간을 만들거나 지우는 키를 받지 않는다 — 다듬는 중에
+     실수로 새 구간이 열리면 무엇을 고치고 있었는지 잃는다. */
+  if (fine.on) {
+    const fmap = Object.assign({}, nav, {
+      ' ': () => finePlay(),
+      '[': () => fineStep(-1), ']': () => fineStep(1),
+      '<': () => fineNudge(-FINE_STEP), '>': () => fineNudge(FINE_STEP),
+      'Escape': () => fineExit(),
+    });
+    if (fmap[k]) { e.preventDefault(); e.stopPropagation(); fmap[k](); }
+    return;
+  }
+
+  if (BY_KEY[k]) { e.preventDefault(); e.stopPropagation(); toggleCat(BY_KEY[k]); return; }
+  const map = Object.assign({}, nav, {
+    'c': () => toggleCover(), 'C': () => delCoveredAt(),
+    'a': () => fineEnter(),
+    'Escape': () => cancelOpen(),
     'Backspace': () => { if (labels.length) delLabel(labels.length - 1); },
     '[': () => { spanIdx = Math.min(SPANS.length - 1, spanIdx + 1); paintHint(); drawWave(); },
     ']': () => { spanIdx = Math.max(0, spanIdx - 1); paintHint(); drawWave(); },
-  };
-  if (map[k]) { e.preventDefault(); map[k](); }
-});
+  });
+  if (map[k]) { e.preventDefault(); e.stopPropagation(); map[k](); }
+}, true);
 addEventListener('mousedown', () => lastActivity = Date.now());
 
 /* 자동 검증이 내부 상태를 직접 조회하기 위한 통로다. */
 window.__labeler = { buildExport, exportWarnings, parseWav, drawWave,
+  fine: () => ({ on: fine.on, i: fine.i, edge: fine.edge, t: fine.on ? fineTime() : null,
+                 n: finePoints().length, play: fine.play }),
   state: () => ({ labels, covered, openSeg, openCover, elapsed,
                   env: env && { rate: env.rate, dur: env.dur, n: env.data.length }, span: SPANS[spanIdx] }) };
 
