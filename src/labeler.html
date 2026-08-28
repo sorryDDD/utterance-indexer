@@ -143,7 +143,7 @@
     <kbd>Space</kbd> 재생/정지 &nbsp; <kbd>,</kbd>/<kbd>.</kbd> 1초 &nbsp; <kbd>←</kbd>/<kbd>→</kbd> 10초<br>
     <kbd>-</kbd>/<kbd>=</kbd> 배속 &nbsp; <kbd>Backspace</kbd> 마지막 구간 삭제<br>
     <kbd>[</kbd>/<kbd>]</kbd> 파형 창 넓게·좁게 &nbsp; 파형을 누르면 그 시각으로<br>
-    <kbd>A</kbd> 미세 조정 — <kbd>[</kbd><kbd>]</kbd> 지점 이동, <kbd>&lt;</kbd><kbd>&gt;</kbd> 조정,<br>
+    <kbd>A</kbd> 미세 조정 — <kbd>[</kbd><kbd>]</kbd> 지점 이동, <kbd>,</kbd><kbd>.</kbd> 조정,<br>
     &nbsp;&nbsp;&nbsp;<kbd>Space</kbd> 그 구간만 듣기, <kbd>Esc</kbd> 나가기
   </div>
 </aside>
@@ -633,7 +633,7 @@ function render() {
     show(document.getElementById('mode'),
       '<b>미세 조정</b> — ' + cat.name + ' 구간의 ' + (fine.edge === 'start' ? '시작' : '끝')
       + ' <b>' + fineTime().toFixed(2) + 's</b> (지점 ' + (at + 1) + '/' + pts.length + ')'
-      + ' &nbsp; <kbd>[</kbd><kbd>]</kbd> 지점 이동 &nbsp; <kbd>&lt;</kbd><kbd>&gt;</kbd> '
+      + ' &nbsp; <kbd>[</kbd><kbd>]</kbd> 지점 이동 &nbsp; <kbd>,</kbd><kbd>.</kbd> '
       + FINE_STEP.toFixed(2) + '초씩 조정 &nbsp; <kbd>Space</kbd> 이 구간 듣기 &nbsp; <kbd>Esc</kbd> 나가기');
   }
 
@@ -774,10 +774,14 @@ addEventListener('keydown', e => {
   /* 미세 조정 모드에서는 구간을 만들거나 지우는 키를 받지 않는다 — 다듬는 중에
      실수로 새 구간이 열리면 무엇을 고치고 있었는지 잃는다. */
   if (fine.on) {
+    /* 다듬기는 Shift 여부와 무관하게 같은 물리 키로 받는다. `<` 와 `,` 는 같은 키에
+       Shift 로만 갈리는데, 입력기나 자판에 따라 Shift 가 실려 오지 않으면 1초 점프로
+       새어 나간다. 모드 안에서는 1초 점프를 두지 않아 겹칠 자리를 없앤다. */
     const fmap = Object.assign({}, nav, {
       ' ': () => finePlay(),
       '[': () => fineStep(-1), ']': () => fineStep(1),
-      '<': () => fineNudge(-FINE_STEP), '>': () => fineNudge(FINE_STEP),
+      ',': () => fineNudge(-FINE_STEP), '<': () => fineNudge(-FINE_STEP),
+      '.': () => fineNudge(FINE_STEP),  '>': () => fineNudge(FINE_STEP),
       'Escape': () => fineExit(),
     });
     if (fmap[k]) { e.preventDefault(); e.stopPropagation(); fmap[k](); }
